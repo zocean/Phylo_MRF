@@ -1,0 +1,328 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+# load packages
+library(tidyr)
+library(scales)
+library(ggforce)
+library(plyr)
+library(reshape2)
+library(ComplexHeatmap)
+library(circlize)
+library(viridis)
+
+# global parameter
+# human chimp orangutan gibbon greenmonkey
+spe_list <- c("human", "chimpanzee", "bonobo", "gorilla")
+col_spe <- c("#B40F20", "#E58601", "#46ACC8", "#E2D200")
+hic_res <- 50000 # 50kb
+col_heatmap_cor_synteny = colorRamp2(c(0.7, 0.9, 1.0), c("white", "#fd8d3c", "#8c2d04"))
+col_heatmap_cor_state = colorRamp2(c(0, 0.3, 0.8), c("white", "#fd8d3c", "#8c2d04"))
+state_anno_list = c("C-high", "C-mid", "C-low", "WC", "NC-hom_high", "NC-hom_low", "NC-pan_low", "NC-pyg_low", "NC-gor_low", "NC")
+state_col_list = c("#67000d", "#cb181d", "#fb6a4a", "#fdb462", "#984ea3", "#377eb8", "#a65628", "#4daf4a", "#ffff33", "#d9d9d9")
+par_col_hic_observed <-  viridis(21, option = "magma")
+par_col_na <- "#f0f0f0"
+state_anno_table <- data.frame(state.anno = state_anno_list, state.anno.col = state_col_list)
+state_anno_table <- cbind(state_anno_table, t(col2rgb(state_anno_table$state.anno.col)))
+## set ggplot theme
+my_theme <- theme_bw() +
+  theme(plot.title = element_text(lineheight=.8, face="bold", size=rel(2))) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(axis.title.y = element_text(size=rel(1.3),margin=margin(0,10,0,0))) +
+  theme(axis.title.x = element_text(size=rel(1.3),margin=margin(10,0,0,0))) +
+  theme(axis.text= element_text(size=rel(1.2), color="black")) +
+  theme(axis.line = element_line(color="black")) +
+  theme(strip.text.x = element_text(size=rel(1.5), face="bold")) +
+  theme(strip.background = element_blank())
+
+phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
+  # 
+  state_list = as.vector(state_table$state)
+  # load the sparse form of state
+  matrix_2d <- read.table(file = paste0("data/phylo_MRF_output/chr", chrom, "/test", chrom, ".txt"), header = F, sep = '\t')
+  colnames(matrix_2d) <- c("chrom_1", "start_1", "stop_1", "chrom_2", "start_2", "stop_2", "state", "human", "chimpanzee", "bonobo", "gorilla")
+  matrix_2d$state <- paste0("S", matrix_2d$state)
+  # give inital naive order of the state by state number
+  matrix_2d$state <- factor(matrix_2d$state, levels = state_list)
+  # add the synteny annotation
+  synteny_table <- read.table(file= paste0("data/phylo_MRF_output/chr", chrom, "/test", chrom, ".region.txt"), header = F, sep = '\t')
+  colnames(synteny_table) <- c("bin_count", "idx_start", "idx_stop", "size", "start_bin")
+  synteny_table$start <- synteny_table$start_bin*hic_res
+  synteny_table$stop <- (synteny_table$start_bin + synteny_table$size)*hic_res
+  synteny_table$synteny_id <- paste0("synteny_", seq(1,nrow(synteny_table),1))
+  synteny_table$synteny_name <- paste0("Synteny block ", seq(1, nrow(synteny_table),1), ' (chr', chrom, ':', synteny_table$start/1000000, 'Mb', '-', synteny_table$stop/1000000, 'Mb)')
+  matrix_2d$synteny <- "NA"
+  for (nn in seq(1, nrow(synteny_table),1)) {
+    idx_start = synteny_table[nn, "idx_start"]
+    idx_stop = synteny_table[nn, "idx_stop"]
+    matrix_2d[idx_start:idx_stop, "synteny"] <- synteny_table[nn, "synteny_id"]
+    matrix_2d[idx_start:idx_stop, "synteny_name"] <- synteny_table[nn, "synteny_name"]
+  }
+  synteny_list <- synteny_table$synteny_id
+  matrix_2d$synteny <- factor(matrix_2d$synteny, levels = synteny_list)
+  # add merged state annotation
+  matrix_2d$state_merge <- state_table[match(matrix_2d$state, state_table$state), "state.anno"]
+  matrix_2d$state_merge <- factor(matrix_2d$state_merge, levels = state_anno_list)
+  # calculate the percent of state in each chrom
+  state_count <- ddply(matrix_2d, .(state), summarize, count = length(state))
+  state_count$per <- state_count$count/sum(state_count$count)
+  matrix_2d$state_per <- state_count[match(matrix_2d$state, state_count$state), "per"]
+  matrix_2d$state_name <- sprintf("State %s (%.2f%%)", matrix_2d$state, matrix_2d$state_per*100)
+  state_count <- ddply(matrix_2d, .(state_merge), summarize, count = length(state))
+  state_count$per <- state_count$count/sum(state_count$count)
+  matrix_2d$state_merge_per <- state_count[match(matrix_2d$state_merge, state_count$state_merge), "per"]
+  matrix_2d$state_merge_name <- sprintf("State %s (%.2f%%)", matrix_2d$state_merge, matrix_2d$state_merge_per*100)
+  # calculate the distance between two bins
+  matrix_2d$dis <- matrix_2d$start_2 - matrix_2d$start_1
+  # add bin annotation
+  matrix_2d$bin_id_1 <- paste0("chr", matrix_2d$chrom_1, "_", matrix_2d$start_1, "_", matrix_2d$stop_1)
+  matrix_2d$bin_id_2 <- paste0("chr", matrix_2d$chrom_2, "_", matrix_2d$start_2, "_", matrix_2d$stop_2)
+  matrix_2d$anno_rt_1 <- anno_table[match(matrix_2d$bin_id_1, anno_table$bin_id), "HMGP_state"]
+  matrix_2d$anno_rt_2 <- anno_table[match(matrix_2d$bin_id_2, anno_table$bin_id), "HMGP_state"]
+  # get the combination of rt states
+  rt_matrix <- ddply(matrix_2d, .(state_merge, dis, anno_rt_1, anno_rt_2), summarize, count = length(state))
+  rt_matrix <- rt_matrix[complete.cases(rt_matrix), ]
+  rt_matrix <- ddply(rt_matrix, .(state_merge, dis), transform, total_count = sum(count))
+  rt_matrix$per <- rt_matrix$count/rt_matrix$total_count
+  rt_matrix$anno_rt_comp <- "UC"
+  rt_matrix[which(rt_matrix$anno_rt_1 %in% c("E", "WE") & rt_matrix$anno_rt_2 %in% c("E", "WE")), "anno_rt_comp"] <- 'C'
+  rt_matrix[which(rt_matrix$anno_rt_1 %in% c("L", "WL") & rt_matrix$anno_rt_2 %in% c("L", "WL")), "anno_rt_comp"] <- 'C'
+  rt_matrix_summary <- ddply(rt_matrix, .(state_merge, dis, anno_rt_comp, total_count), summarize, per_merge = sum(per))
+  plot_comp_with_rt <-ggplot(subset(rt_matrix_summary, state_merge %in% c("C-high", "C-mid","WC", "NC") & anno_rt_comp == "C" & total_count > 100), 
+         aes(x = dis/1000000, y = per_merge, color = state_merge)) +
+    geom_line(alpha = 0.8, size = 1.5) +
+    xlab("Distance (Mb)") +
+    ylab("Matched RT state fraction") +
+    coord_cartesian(xlim = c(0, 10)) +
+    scale_y_continuous(labels = percent) +
+    scale_color_manual(values = col_list) +
+    #facet_wrap(~ synteny_name, ncol = 4) +
+    my_theme
+  pdf(file = paste0("figure/figure_chr", chrom, "_rt_state.pdf"), width = 6, height = 5)
+  print(plot_comp_with_rt)
+  dev.off()
+  # for each synteny block extract the hi-c matrix
+  pdf(file = paste0("figure/figure_chr", chrom, "_synteny_hic.pdf"), width = 30, height = 7)
+  for (nn in seq(1, nrow(synteny_table),1)) {
+    synteny_id = synteny_table[nn, "synteny_id"]
+    synteny_name = synteny_table[nn, "synteny_name"]
+    makeSymm <- function(m) {
+      m[lower.tri(m)] <- t(m)[lower.tri(m)]
+      return(m)
+    }
+    build_2d_matrix <- function(matrix_table, spe) {
+      hic_matrix = subset(matrix_table, synteny == synteny_id, select = c("start_1", "start_2", spe))
+      hic_matrix$start_1 <- hic_matrix$start_1/hic_res
+      hic_matrix$start_2 <- hic_matrix$start_2/hic_res
+      hic_matrix <- dcast(hic_matrix, start_1 ~ start_2, mean, value.var = spe)
+      rownames(hic_matrix) <- x$start_1
+      hic_matrix[, 1] <- NULL
+      hic_matrix <- makeSymm(hic_matrix)
+      return(hic_matrix)
+    }
+    hic_synteny_human <- build_2d_matrix(matrix_2d, "human")
+    hic_synteny_chimp <- build_2d_matrix(matrix_2d, "chimpanzee")
+    hic_synteny_bonobo <- build_2d_matrix(matrix_2d, "bonobo")
+    hic_synteny_gorilla <- build_2d_matrix(matrix_2d, "gorilla")
+    par_col_hic_observed <-  viridis(51, option = "magma")
+    data_scale = quantile(c(unlist(hic_synteny_human), unlist(hic_synteny_chimp), unlist(hic_synteny_bonobo), unlist(hic_synteny_gorilla)), probs = seq(0.01,0.99,0.98/50))
+    ht_hic_human <- Heatmap(hic_synteny_human,
+                         col = colorRamp2(data_scale, par_col_hic_observed),
+                         "hic.ob.human",
+                         column_title = "Hi-C Observed Human",
+                         na_col = par_col_na,
+                         cluster_rows = F, cluster_columns = F,
+                         show_row_names = F, show_column_names = F,
+                         use_raster = T, raster_device = "png", raster_quality = 2,
+                         width = 1)
+    ht_hic_chimp <- Heatmap(hic_synteny_chimp,
+                         col = colorRamp2(data_scale, par_col_hic_observed),
+                         "hic.ob.chimp",
+                         column_title = "Hi-C Observed Chimp",
+                         na_col = par_col_na,
+                         cluster_rows = F, cluster_columns = F,
+                         show_row_names = F, show_column_names = F,
+                         use_raster = T, raster_device = "png", raster_quality = 2,
+                         width = 1)
+    ht_hic_bonobo <- Heatmap(hic_synteny_bonobo,
+                         col = colorRamp2(data_scale, par_col_hic_observed),
+                         "hic.ob.bonobo",
+                         column_title = "Hi-C Observed Bonobo",
+                         na_col = par_col_na,
+                         cluster_rows = F, cluster_columns = F,
+                         show_row_names = F, show_column_names = F,
+                         use_raster = T, raster_device = "png", raster_quality = 2,
+                         width = 1)
+    ht_hic_gorilla <- Heatmap(hic_synteny_gorilla,
+                         col = colorRamp2(data_scale, par_col_hic_observed),
+                         "hic.ob.gorilla",
+                         column_title = "Hi-C Observed Gorilla",
+                         na_col = par_col_na,
+                         cluster_rows = F, cluster_columns = F,
+                         show_row_names = F, show_column_names = F,
+                         use_raster = T, raster_device = "png", raster_quality = 2,
+                         width = 1)
+    ht_list = ht_hic_human + ht_hic_chimp + ht_hic_bonobo + ht_hic_gorilla
+    draw(ht_list, row_title = "synteny_name")
+  }
+  dev.off()
+  # plot the distribution profile for state vs distance
+  dis2state <- ddply(matrix_2d, .(synteny, synteny_name, dis, state, state_name), summarize, count = length(state))
+  dis2state <- ddply(dis2state, .(synteny, synteny_name, dis), transform, total = sum(count))
+  dis2state$per <- dis2state$count/dis2state$total
+  plot_state_trend <- ggplot(dis2state, aes(x = dis/1000000, y = per, fill = state)) +
+    geom_col() +
+    xlab("Chromosome position (Mb)") +
+    ylab("") +
+    #coord_cartesian(xlim = c(0, 1200)) +
+    scale_x_continuous(expand = c(0,0)) +
+    scale_y_continuous(labels = percent) +
+    facet_wrap(~ synteny_name, ncol = 1, scales = "fixed") +
+    my_theme
+  # plot merged state
+  dis2state <- ddply(matrix_2d, .(synteny, synteny_name, dis, state_merge, state_merge_name), summarize, count = length(state))
+  dis2state <- ddply(dis2state, .(synteny, synteny_name, dis), transform, total = sum(count))
+  dis2state$per <- dis2state$count/dis2state$total
+  col_list <- as.character(state_anno_table$state.anno.col)
+  names(col_list) <- state_anno_table$state.anno
+  plot_state_trend_merge <- ggplot(dis2state, aes(x = dis/1000000, y = per, fill = state_merge)) +
+    geom_col() +
+    xlab("Chromosome position (Mb)") +
+    ylab("") +
+    #coord_cartesian(xlim = c(0, 1200)) +
+    scale_x_continuous(expand = c(0,0)) +
+    scale_y_continuous(labels = percent) +
+    scale_fill_manual(values = col_list ) +
+    facet_wrap(~ synteny_name, ncol = 1, scales = "fixed") +
+    my_theme
+  pdf(file = paste0("figure/figure_chr", chrom, "_state_trend_per_synteny.pdf"), width = 9, height = 12)
+  print(plot_state_trend)
+  print(plot_state_trend_merge)
+  dev.off()
+  #
+  # plot the correlations between species in each chromosome in each state
+  pdf(file = paste0("figure/figure_chr", chrom, "_pearson_correlation_per_state.pdf"), width = 6, height = 5)
+  for (state_id in state_list) {
+    cor_matrix <- cor(subset(matrix_2d, state == state_id, spe_list), method = "pearson", use = "complete.obs")
+    ht_cor <- Heatmap(cor_matrix, name = "Cor", col = col_heatmap_cor_state, 
+                      cluster_rows = T, cluster_columns = T, 
+                      show_row_names = T, show_column_names = T,
+                      column_title = state_id, 
+                      cell_fun = function(j, i, x, y, w, h, col) {
+        grid.text(round(cor_matrix[i, j], 3), x, y)})
+    print(ht_cor)
+  }
+  dev.off()
+  #
+  # plot the correlations between species in each chromsome in each synteny block
+  pdf(file = paste0("figure/figure_chr", chrom, "_pearson_correlation_per_synteny.pdf"), width = 6, height = 5)
+  for (nn in seq(1, length(synteny_list), 1)) {
+    synteny_id = synteny_list[nn]
+    synteny_name = synteny_table[nn, "synteny_name"]
+    cor_matrix <- cor(subset(matrix_2d, synteny == synteny_id, spe_list), method = "pearson" , use = "complete.obs")
+    ht_cor <- Heatmap(cor_matrix, name = "Cor", col = col_heatmap_cor_synteny, 
+                      cluster_rows = T, cluster_columns = T, 
+                      show_row_names = T, show_column_names = T,
+                      column_title = synteny_name)
+    print(ht_cor)
+  }
+  dev.off()
+  #
+  # plot the distribution of Hi-C value in each state
+  matrix_2d_melt <- melt(matrix_2d[, 7:ncol(matrix_2d)], id.vars = c("state", "synteny","state_name"), measure.vars = spe_list, variable.name = "spe", value.name = "value")
+  matrix_2d_melt$spe <- factor(matrix_2d_melt$spe, levels = spe_list)
+  # TODO define state annotation
+  matrix_2d_melt$state <- factor(matrix_2d_melt$state, levels = state_list)
+  state2state_name <- unique(matrix_2d_melt[, c("state", "state_name")])
+  state_name_list <- state2state_name[match(state_list, state2state_name$state), "state_name"]
+  matrix_2d_melt$state_name <- factor(matrix_2d_melt$state_name, levels = state_name_list)
+  plot_hic_boxplot_fixed <- ggplot(matrix_2d_melt, aes(x = spe, y = value, fill = spe)) +
+    geom_hline(yintercept = 0.0, linetype = 2, color = "black") +
+    geom_violin(alpha=0.7, scale = "width") +
+    geom_boxplot(outlier.shape = NA, fill = "white", width = 0.3) +
+    coord_cartesian(ylim = c(0,6)) +
+    xlab("") +
+    ylab("") +
+    scale_fill_manual(name = "", values = col_spe) +
+    facet_wrap(~ state_name, scales = "free_x", ncol = 5, labeller = labeller(.multi_line = F)) +
+    #facet_wrap(c("state.anno", "name"), scales = "free_x", ncol = 8, labeller = labeller(.multi_line = F)) +
+    my_theme +
+    theme(axis.text.x = element_blank()) +
+    theme(legend.position = "bottom", legend.text = element_text(size=rel(1.5)), legend.margin = margin(0,0,0,0)) +
+    theme(panel.grid.major.y = element_line(linetype = 2, color="grey"))
+  plot_hic_boxplot <- ggplot(matrix_2d_melt, aes(x = spe, y = value, fill = spe)) +
+    geom_hline(yintercept = 0.0, linetype = 2, color = "black") +
+    geom_violin(alpha=0.7, scale = "width") +
+    geom_boxplot(outlier.shape = NA, fill = "white", width = 0.3) +
+    #coord_cartesian(ylim = c(0,6)) +
+    xlab("") +
+    ylab("") +
+    scale_fill_manual(name = "", values = col_spe) +
+    facet_wrap(~ state_name, scales = "free_y", ncol = 5, labeller = labeller(.multi_line = F)) +
+    #facet_wrap(c("state.anno", "name"), scales = "free_x", ncol = 8, labeller = labeller(.multi_line = F)) +
+    my_theme +
+    theme(axis.text.x = element_blank()) +
+    theme(legend.position = "bottom", legend.text = element_text(size=rel(1.5)), legend.margin = margin(0,0,0,0)) +
+    theme(panel.grid.major.y = element_line(linetype = 2, color="grey"))
+  pdf(file = paste0("figure/figure_chr", chrom, "_boxplot.pdf"), width = 12, height = 10)
+  print(plot_hic_boxplot)
+  print(plot_hic_boxplot_fixed)
+  dev.off()
+  #
+  table_boxplot <- ddply(matrix_2d_melt, .(state, spe), summarize, hic_5 = quantile(value, probs = 0.05), hic_25 = quantile(value, probs = 0.25), hic_50 = quantile(value, probs = 0.5), hic_75 = quantile(value, probs = 0.75), hic_95 = quantile(value, probs = 0.95))
+  table_boxplot <- ddply(table_boxplot, .(state), transform, hic_5_ratio = max(hic_5)/min(hic_5), hic_25_ratio = max(hic_25)/min(hic_25), hic_50_ratio = max(hic_50)/min(hic_50), hic_75_ratio = max(hic_75)/min(hic_75), hic_95_ratio = max(hic_95)/min(hic_95))
+  table_boxplot$hic_range <- table_boxplot$hic_95 - table_boxplot$hic_5
+  table_boxplot <- ddply(table_boxplot, .(state), transform, hic_5_diff = (max(hic_5) - min(hic_5))/min(hic_range), hic_25_diff = (max(hic_25) - min(hic_25))/min(hic_range), hic_50_diff = (max(hic_50) - min(hic_50))/min(hic_range), hic_75_diff = (max(hic_75) - min(hic_75))/min(hic_range), hic_95_diff = (max(hic_95) - min(hic_95))/min(hic_range))
+  table_boxplot_global <- ddply(matrix_2d_melt, .(spe), summarize, hic_25 = quantile(value, probs = 0.25), hic_50 = quantile(value, probs = 0.5), hic_75 = quantile(value, probs = 0.75))
+  x <- unique(table_boxplot[, c("state", "hic_5_ratio", "hic_25_ratio", "hic_50_ratio", "hic_75_ratio", "hic_95_ratio")])
+  x$mean_ratio <- rowMeans(x[, 2:6])
+  x <- ddply(x, .(state), transform, median_ratio = median(hic_5_ratio, hic_25_ratio, hic_50_ratio, hic_75_ratio, hic_95_ratio))
+  x[order(x$median_ratio), ]
+  x <- unique(table_boxplot[, c("state", "hic_5_diff", "hic_25_diff", "hic_50_diff", "hic_75_diff", "hic_95_diff")])
+  x$mean_diff <- rowMeans(x[, 2:6])
+  x[order(x$mean_diff), ]
+  
+}
+
+#
+state_list = paste0("S", seq(1,20,1))
+state_table <- data.frame(state = paste0("S", seq(1,20,1)), 
+                          state.anno = c("NC-hom_low", "NC", "C-high", "NC-pan_low", "C-low", 
+                                         "WC", "C-mid", "NC-pyg_low", "WC", "C-mid",
+                                         "NC-pyg_low", "NC-hom_low", "NC", "NC", "NC-hom_high",
+                                         "NC-hom_low", "C-mid", "NC", "NC", "NC-gor_low"))
+state_table$state.anno.col <- state_anno_table[match(state_table$state.anno, state_anno_table$state.anno), "state.anno.col"]
+state_table <- cbind(state_table, t(col2rgb(state_table$state.anno.col)))
+# load 50kb bin annotation
+anno_table <- read.table(file = "result/hg38_50kb_anno.txt", header = T, comment.char = "", sep = '\t')
+colnames(anno_table)[1] <- "chrom"
+anno_table$bin_id = paste(anno_table$chrom, anno_table$start, anno_table$stop, sep = '_')
+chrom_list = c("1", "10", "11", "12", "14", "16", "17", "18", "8")
+
+for (chrom in chrom_list) {
+  phylo_mrf_analysis(chrom, state_table, anno_table)
+}
+
+# chromosome 1
+# conserved S3 (high),
+# conserved S5 (low)
+# conserved S7, S10, S17 (middle)
+# weakly conserved S6, S9
+# NC S1, S12, S16 (human-specific low)
+# NC S4 (chimp-sepcific low)
+# NC S8, S11 (bonobo-specific low)
+# NC S15 (human-specific high)
+# NC S20 (gorilla-specific low)
+# NC S2, S13, S14, S18, S19 (Un-conserved)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

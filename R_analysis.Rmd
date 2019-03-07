@@ -3,6 +3,7 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+## Global setting and parameters
 
 ```{r}
 # load packages
@@ -19,11 +20,12 @@ library(viridis)
 # human chimp orangutan gibbon greenmonkey
 spe_list <- c("human", "chimpanzee", "bonobo", "gorilla")
 col_spe <- c("#B40F20", "#E58601", "#46ACC8", "#E2D200")
+state_list = paste0("S", seq(1,30,1))
 hic_res <- 50000 # 50kb
 col_heatmap_cor_synteny = colorRamp2(c(0.7, 0.9, 1.0), c("white", "#fd8d3c", "#8c2d04"))
 col_heatmap_cor_state = colorRamp2(c(0, 0.3, 0.8), c("white", "#fd8d3c", "#8c2d04"))
-state_anno_list = c("C-high", "C-mid", "C-low", "WC", "NC-hom_high", "NC-hom_low", "NC-pan_low", "NC-pyg_low", "NC-gor_low", "NC")
-state_col_list = c("#67000d", "#cb181d", "#fb6a4a", "#fdb462", "#984ea3", "#377eb8", "#a65628", "#4daf4a", "#ffff33", "#d9d9d9")
+state_anno_list = c("C-high", "C-mid", "C-low", "WC", "NC-hom_high", "NC-hom_low", "NC-pan_high", "NC-pan_low", "NC-pyg_high",  "NC-pyg_low", "NC-gor_high", "NC-gor_low", "NC")
+state_col_list = c("#67000d", "#cb181d", "#fb6a4a", "#fba988", "#80b1d3", "#377eb8", "#e6ab02", "#a65628", "#77ad75", "#3d8b3b", "#e78ac3",  "#984ea3", "#d9d9d9")
 par_col_hic_observed <-  viridis(21, option = "magma")
 par_col_na <- "#f0f0f0"
 state_anno_table <- data.frame(state.anno = state_anno_list, state.anno.col = state_col_list)
@@ -39,22 +41,91 @@ my_theme <- theme_bw() +
   theme(strip.text.x = element_text(size=rel(1.5), face="bold")) +
   theme(strip.background = element_blank())
 
+# analysis begin from here
+state_table <- data.frame(state = paste0("S", seq(1,30,1)), 
+                          state.anno= c("WC", "NC", "NC-pan_high", "C-high", "NC", 
+                                        "C-low", "NC-gor_low", "NC-gor_low", "NC", "NC-pyg_low", 
+                                        "WC", "C-high", "WC", "NC-hom_high", "C-mid", 
+                                        "C-mid", "NC-gor_high", "NC-hom_low", "NC-pyg_high", "NC-hom_low", 
+                                        "NC-pyg_low", "NC-hom_high", "C-mid", "C-mid", "NC", 
+                                        "NC", "NC-pan_low", "NC-hom_low", "WC", "NC-hom_low"))
+state_table$state.anno.col <- state_anno_table[match(state_table$state.anno, state_anno_table$state.anno), "state.anno.col"]
+state_table <- cbind(state_table, t(col2rgb(state_table$state.anno.col)))
+state_table_sorted_by_group <- state_table[order(match(state_table$state.anno, state_anno_list)), ]
+
+# load 50kb bin annotation
+anno_table <- read.table(file = "result/hg38_50kb_anno.txt", header = T, comment.char = "", sep = '\t')
+colnames(anno_table)[1] <- "chrom"
+anno_table$bin_id = paste(anno_table$chrom, anno_table$start, anno_table$stop, sep = '_')
+
+# chrom list
+chrom_list = seq(1,22,1) #c("1", "10", "11", "12", "14", "16", "17", "18", "8")
+
+# main function 
+for (chrom in chrom_list) {
+  phylo_mrf_analysis(chrom, state_table, anno_table)
+}
+
+#################
+# RECOMB version
+# chromosome 1
+# conserved S3 (high),
+# conserved S5 (low)
+# conserved S7, S10, S17 (middle)
+# weakly conserved S6, S9
+# NC S1, S12, S16 (human-specific low)
+# NC S4 (chimp-sepcific low)
+# NC S8, S11 (bonobo-specific low)
+# NC S15 (human-specific high)
+# NC S20 (gorilla-specific low)
+# NC S2, S13, S14, S18, S19 (Un-conserved)
+
+##################
+# 2019 version
+# whole genome 22 autosomes
+# Conserved S4,S12 (high)
+# Conserved S15, S16, S23, S24  (middle)
+# Conserved S6 (low)  
+# Weakly Conserved S1, S11, S13, S22, S29
+# No Conserved (NC)
+# NC S18, S20, S28, S30 (human-specific low)
+# NC S14 (human-specific high)
+# NC S27 (chimp-specific low)
+# NC S3 (chimp-specific high)
+# NC S10, S21 (bonobo-specific low)
+# NC S19 (bonobo-specific high)
+# NC S7, S8 (gorilla-specific low)
+# NC S17 (gorilla-specific high)
+# NC S2, S5, S9, S25, S26 (Un-conserved)
+
+```
+
+## Individual analysis for each chromosome
+
+```{r}
 phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
   # 
   state_list = as.vector(state_table$state)
   # load the sparse form of state
-  matrix_2d <- read.table(file = paste0("data/phylo_MRF_output/chr", chrom, "/test", chrom, ".txt"), header = F, sep = '\t')
+  matrix_2d <- read.table(file = paste0("data/phylo_MRF_output_global_V2/", "test", chrom, ".txt"), header = F, sep = '\t')
   colnames(matrix_2d) <- c("chrom_1", "start_1", "stop_1", "chrom_2", "start_2", "stop_2", "state", "human", "chimpanzee", "bonobo", "gorilla")
   matrix_2d$state <- paste0("S", matrix_2d$state)
   # give inital naive order of the state by state number
   matrix_2d$state <- factor(matrix_2d$state, levels = state_list)
   # add the synteny annotation
-  synteny_table <- read.table(file= paste0("data/phylo_MRF_output/chr", chrom, "/test", chrom, ".region.txt"), header = F, sep = '\t')
-  colnames(synteny_table) <- c("bin_count", "idx_start", "idx_stop", "size", "start_bin")
+  synteny_table <- read.table(file= paste0("data/phylo_MRF_output_global_V2/estimate/", "test", chrom, ".region.txt"), header = F, sep = '\t')
+  colnames(synteny_table) <- c("bin_count", "idx_start", "idx_stop", "size", "size_2", "start_bin", "start_bin_2")
   synteny_table$start <- synteny_table$start_bin*hic_res
   synteny_table$stop <- (synteny_table$start_bin + synteny_table$size)*hic_res
+  # take care of square
+  synteny_table$start_2 <- synteny_table$start_bin_2*hic_res
+  synteny_table$stop_2 <- (synteny_table$start_bin_2 + synteny_table$size_2)*hic_res
+  # 
   synteny_table$synteny_id <- paste0("synteny_", seq(1,nrow(synteny_table),1))
+  # 
   synteny_table$synteny_name <- paste0("Synteny block ", seq(1, nrow(synteny_table),1), ' (chr', chrom, ':', synteny_table$start/1000000, 'Mb', '-', synteny_table$stop/1000000, 'Mb)')
+  idx <- which(synteny_table$start_bin != synteny_table$start_bin_2)
+  synteny_table[idx, "synteny_name"] <- paste0("Synteny block ", idx, ' (chr', chrom, ':', synteny_table[idx, "start"]/1000000, 'Mb', '-', synteny_table[idx, "stop"]/1000000, 'Mb', ' chr', chrom, ':', synteny_table[idx, "start_2"]/1000000, 'Mb', '-', synteny_table[idx, "stop_2"]/1000000, 'Mb)')
   matrix_2d$synteny <- "NA"
   for (nn in seq(1, nrow(synteny_table),1)) {
     idx_start = synteny_table[nn, "idx_start"]
@@ -62,8 +133,11 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
     matrix_2d[idx_start:idx_stop, "synteny"] <- synteny_table[nn, "synteny_id"]
     matrix_2d[idx_start:idx_stop, "synteny_name"] <- synteny_table[nn, "synteny_name"]
   }
+  # set the factor levels for synteny_id and synteny_name
   synteny_list <- synteny_table$synteny_id
+  synteny_name_list <- synteny_table$synteny_name
   matrix_2d$synteny <- factor(matrix_2d$synteny, levels = synteny_list)
+  matrix_2d$synteny_name <- factor(matrix_2d$synteny_name, levels = synteny_name_list)
   # add merged state annotation
   matrix_2d$state_merge <- state_table[match(matrix_2d$state, state_table$state), "state.anno"]
   matrix_2d$state_merge <- factor(matrix_2d$state_merge, levels = state_anno_list)
@@ -92,7 +166,9 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
   rt_matrix[which(rt_matrix$anno_rt_1 %in% c("E", "WE") & rt_matrix$anno_rt_2 %in% c("E", "WE")), "anno_rt_comp"] <- 'C'
   rt_matrix[which(rt_matrix$anno_rt_1 %in% c("L", "WL") & rt_matrix$anno_rt_2 %in% c("L", "WL")), "anno_rt_comp"] <- 'C'
   rt_matrix_summary <- ddply(rt_matrix, .(state_merge, dis, anno_rt_comp, total_count), summarize, per_merge = sum(per))
-  plot_comp_with_rt <-ggplot(subset(rt_matrix_summary, state_merge %in% c("C-high", "C-mid","WC", "NC") & anno_rt_comp == "C" & total_count > 100), 
+  col_list <- as.character(state_anno_table$state.anno.col)
+  names(col_list) <- state_anno_table$state.anno
+  plot_comp_with_rt <-ggplot(subset(rt_matrix_summary, state_merge %in% c("C-high", "C-mid","C-low", "WC", "NC") & anno_rt_comp == "C" & total_count > 100), 
          aes(x = dis/1000000, y = per_merge, color = state_merge)) +
     geom_line(alpha = 0.8, size = 1.5) +
     xlab("Distance (Mb)") +
@@ -119,9 +195,11 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
       hic_matrix$start_1 <- hic_matrix$start_1/hic_res
       hic_matrix$start_2 <- hic_matrix$start_2/hic_res
       hic_matrix <- dcast(hic_matrix, start_1 ~ start_2, mean, value.var = spe)
-      rownames(hic_matrix) <- x$start_1
+      rownames(hic_matrix) <- hic_matrix$start_1
       hic_matrix[, 1] <- NULL
-      hic_matrix <- makeSymm(hic_matrix)
+      if (nrow(hic_matrix) == ncol(hic_matrix)) {
+       hic_matrix <- makeSymm(hic_matrix) 
+      }
       return(hic_matrix)
     }
     hic_synteny_human <- build_2d_matrix(matrix_2d, "human")
@@ -129,7 +207,7 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
     hic_synteny_bonobo <- build_2d_matrix(matrix_2d, "bonobo")
     hic_synteny_gorilla <- build_2d_matrix(matrix_2d, "gorilla")
     par_col_hic_observed <-  viridis(51, option = "magma")
-    data_scale = quantile(c(unlist(hic_synteny_human), unlist(hic_synteny_chimp), unlist(hic_synteny_bonobo), unlist(hic_synteny_gorilla)), probs = seq(0.01,0.99,0.98/50))
+    data_scale = quantile(c(unlist(hic_synteny_human), unlist(hic_synteny_chimp), unlist(hic_synteny_bonobo), unlist(hic_synteny_gorilla)), probs = seq(0.01,0.99,0.98/50), na.rm = T)
     ht_hic_human <- Heatmap(hic_synteny_human,
                          col = colorRamp2(data_scale, par_col_hic_observed),
                          "hic.ob.human",
@@ -167,7 +245,51 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
                          use_raster = T, raster_device = "png", raster_quality = 2,
                          width = 1)
     ht_list = ht_hic_human + ht_hic_chimp + ht_hic_bonobo + ht_hic_gorilla
-    draw(ht_list, row_title = "synteny_name")
+    draw(ht_list, row_title = synteny_name)
+  }
+  dev.off()
+  # plot the state matrix
+  pdf(file = paste0("figure/figure_chr", chrom, "_phylo-MRF_state.pdf"), width = 8, height = 7)
+  for (nn in seq(1, nrow(synteny_table),1)) {
+    synteny_id = synteny_table[nn, "synteny_id"]
+    synteny_name = synteny_table[nn, "synteny_name"]
+    makeSymm <- function(m) {
+      m[lower.tri(m)] <- t(m)[lower.tri(m)]
+      return(m)
+    }
+    build_2d_state_matrix <- function(matrix_table) {
+      hic_matrix = subset(matrix_table, synteny == synteny_id, select = c("start_1", "start_2", "state_merge"))
+      hic_matrix$start_1 <- hic_matrix$start_1/hic_res
+      hic_matrix$start_2 <- hic_matrix$start_2/hic_res
+      hic_matrix <- dcast(hic_matrix, start_1 ~ start_2, value.var = "state_merge")
+      rownames(hic_matrix) <- hic_matrix$start_1
+      hic_matrix[, 1] <- NULL
+      if(nrow(hic_matrix) == ncol(hic_matrix)) {
+       hic_matrix <- makeSymm(hic_matrix) 
+      }
+      return(hic_matrix)
+    }
+    build_2d_state_matrix_direct <- function(nn) {
+      hic_matrix <- read.table(file= paste0("data/phylo_MRF_output_global_V2/estimate/", "test", chrom, ".", nn, ".txt"), header = F, sep = '\t')
+      hic_matrix <- apply(hic_matrix, 2, function(x) paste0("S", x))
+      hic_matrix <- apply(hic_matrix, 2, function(x) state_table$state.anno[match(x, state_table$state)])
+    }
+    #if (synteny_table[nn, "start_bin"] != synteny_table[nn, "start_bin_2"]) {
+    #  state_synteny <- build_2d_state_matrix_direct(nn)
+    #} else {
+    state_synteny <- build_2d_state_matrix(matrix_2d)
+    #}
+    par_col_state <-  structure(state_col_list, names = state_anno_list)
+    ht_state <- Heatmap(state_synteny,
+                         col = par_col_state,
+                         "phylo-MRF state",
+                         column_title = synteny_name,
+                         na_col = par_col_na,
+                         cluster_rows = F, cluster_columns = F,
+                         show_row_names = F, show_column_names = F,
+                         use_raster = T, raster_device = "png", raster_quality = 2,
+                         width = 1)
+    draw(ht_state)
   }
   dev.off()
   # plot the distribution profile for state vs distance
@@ -199,7 +321,7 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
     scale_fill_manual(values = col_list ) +
     facet_wrap(~ synteny_name, ncol = 1, scales = "fixed") +
     my_theme
-  pdf(file = paste0("figure/figure_chr", chrom, "_state_trend_per_synteny.pdf"), width = 9, height = 12)
+  pdf(file = paste0("figure/figure_chr", chrom, "_state_trend_per_synteny.pdf"), width = 9, height = max(2.5, 1.4*nrow(synteny_table)))
   print(plot_state_trend)
   print(plot_state_trend_merge)
   dev.off()
@@ -231,93 +353,821 @@ phylo_mrf_analysis <- function(chrom, state_table, anno_table) {
     print(ht_cor)
   }
   dev.off()
-  #
-  # plot the distribution of Hi-C value in each state
-  matrix_2d_melt <- melt(matrix_2d[, 7:ncol(matrix_2d)], id.vars = c("state", "synteny","state_name"), measure.vars = spe_list, variable.name = "spe", value.name = "value")
-  matrix_2d_melt$spe <- factor(matrix_2d_melt$spe, levels = spe_list)
-  # TODO define state annotation
-  matrix_2d_melt$state <- factor(matrix_2d_melt$state, levels = state_list)
-  state2state_name <- unique(matrix_2d_melt[, c("state", "state_name")])
-  state_name_list <- state2state_name[match(state_list, state2state_name$state), "state_name"]
-  matrix_2d_melt$state_name <- factor(matrix_2d_melt$state_name, levels = state_name_list)
-  plot_hic_boxplot_fixed <- ggplot(matrix_2d_melt, aes(x = spe, y = value, fill = spe)) +
-    geom_hline(yintercept = 0.0, linetype = 2, color = "black") +
-    geom_violin(alpha=0.7, scale = "width") +
-    geom_boxplot(outlier.shape = NA, fill = "white", width = 0.3) +
-    coord_cartesian(ylim = c(0,6)) +
-    xlab("") +
-    ylab("") +
-    scale_fill_manual(name = "", values = col_spe) +
-    facet_wrap(~ state_name, scales = "free_x", ncol = 5, labeller = labeller(.multi_line = F)) +
-    #facet_wrap(c("state.anno", "name"), scales = "free_x", ncol = 8, labeller = labeller(.multi_line = F)) +
-    my_theme +
-    theme(axis.text.x = element_blank()) +
-    theme(legend.position = "bottom", legend.text = element_text(size=rel(1.5)), legend.margin = margin(0,0,0,0)) +
-    theme(panel.grid.major.y = element_line(linetype = 2, color="grey"))
-  plot_hic_boxplot <- ggplot(matrix_2d_melt, aes(x = spe, y = value, fill = spe)) +
-    geom_hline(yintercept = 0.0, linetype = 2, color = "black") +
-    geom_violin(alpha=0.7, scale = "width") +
-    geom_boxplot(outlier.shape = NA, fill = "white", width = 0.3) +
-    #coord_cartesian(ylim = c(0,6)) +
-    xlab("") +
-    ylab("") +
-    scale_fill_manual(name = "", values = col_spe) +
-    facet_wrap(~ state_name, scales = "free_y", ncol = 5, labeller = labeller(.multi_line = F)) +
-    #facet_wrap(c("state.anno", "name"), scales = "free_x", ncol = 8, labeller = labeller(.multi_line = F)) +
-    my_theme +
-    theme(axis.text.x = element_blank()) +
-    theme(legend.position = "bottom", legend.text = element_text(size=rel(1.5)), legend.margin = margin(0,0,0,0)) +
-    theme(panel.grid.major.y = element_line(linetype = 2, color="grey"))
-  pdf(file = paste0("figure/figure_chr", chrom, "_boxplot.pdf"), width = 12, height = 10)
-  print(plot_hic_boxplot)
-  print(plot_hic_boxplot_fixed)
-  dev.off()
-  #
-  table_boxplot <- ddply(matrix_2d_melt, .(state, spe), summarize, hic_5 = quantile(value, probs = 0.05), hic_25 = quantile(value, probs = 0.25), hic_50 = quantile(value, probs = 0.5), hic_75 = quantile(value, probs = 0.75), hic_95 = quantile(value, probs = 0.95))
-  table_boxplot <- ddply(table_boxplot, .(state), transform, hic_5_ratio = max(hic_5)/min(hic_5), hic_25_ratio = max(hic_25)/min(hic_25), hic_50_ratio = max(hic_50)/min(hic_50), hic_75_ratio = max(hic_75)/min(hic_75), hic_95_ratio = max(hic_95)/min(hic_95))
-  table_boxplot$hic_range <- table_boxplot$hic_95 - table_boxplot$hic_5
-  table_boxplot <- ddply(table_boxplot, .(state), transform, hic_5_diff = (max(hic_5) - min(hic_5))/min(hic_range), hic_25_diff = (max(hic_25) - min(hic_25))/min(hic_range), hic_50_diff = (max(hic_50) - min(hic_50))/min(hic_range), hic_75_diff = (max(hic_75) - min(hic_75))/min(hic_range), hic_95_diff = (max(hic_95) - min(hic_95))/min(hic_range))
-  table_boxplot_global <- ddply(matrix_2d_melt, .(spe), summarize, hic_25 = quantile(value, probs = 0.25), hic_50 = quantile(value, probs = 0.5), hic_75 = quantile(value, probs = 0.75))
-  x <- unique(table_boxplot[, c("state", "hic_5_ratio", "hic_25_ratio", "hic_50_ratio", "hic_75_ratio", "hic_95_ratio")])
-  x$mean_ratio <- rowMeans(x[, 2:6])
-  x <- ddply(x, .(state), transform, median_ratio = median(hic_5_ratio, hic_25_ratio, hic_50_ratio, hic_75_ratio, hic_95_ratio))
-  x[order(x$median_ratio), ]
-  x <- unique(table_boxplot[, c("state", "hic_5_diff", "hic_25_diff", "hic_50_diff", "hic_75_diff", "hic_95_diff")])
-  x$mean_diff <- rowMeans(x[, 2:6])
-  x[order(x$mean_diff), ]
-  
+  ##
+  #table_boxplot <- ddply(matrix_2d_melt, .(state, spe), summarize, hic_5 = quantile(value, probs = 0.05), hic_25 = quantile(value, probs = 0.25), hic_50 = quantile(value, probs = 0.5), hic_75 = quantile(value, probs = 0.75), hic_95 = quantile(value, probs = 0.95))
+  #table_boxplot <- ddply(table_boxplot, .(state), transform, hic_5_ratio = max(hic_5)/min(hic_5), hic_25_ratio = max(hic_25)/min(hic_25), hic_50_ratio = max(hic_50)/min(hic_50), hic_75_ratio = max(hic_75)/min(hic_75), hic_95_ratio = max(hic_95)/min(hic_95))
+  #table_boxplot$hic_range <- table_boxplot$hic_95 - table_boxplot$hic_5
+  #table_boxplot <- ddply(table_boxplot, .(state), transform, hic_5_diff = (max(hic_5) - min(hic_5))/min(hic_range), hic_25_diff = (max(hic_25) - min(hic_25))/min(hic_range), hic_50_diff = (max(hic_50) - min(hic_50))/min(hic_range), hic_75_diff = (max(hic_75) - min(hic_75))/min(hic_range), hic_95_diff = (max(hic_95) - min(hic_95))/min(hic_range))
+  #table_boxplot_global <- ddply(matrix_2d_melt, .(spe), summarize, hic_25 = quantile(value, probs = 0.25), hic_50 = quantile(value, probs = 0.5), hic_75 = quantile(value, probs = 0.75))
+  #x <- unique(table_boxplot[, c("state", "hic_5_ratio", "hic_25_ratio", "hic_50_ratio", "hic_75_ratio", "hic_95_ratio")])
+  #x$mean_ratio <- rowMeans(x[, 2:6])
+  #x <- ddply(x, .(state), transform, median_ratio = median(hic_5_ratio, hic_25_ratio, hic_50_ratio, hic_75_ratio, hic_95_ratio))
+  #x[order(x$median_ratio), ]
+  #x <- unique(table_boxplot[, c("state", "hic_5_diff", "hic_25_diff", "hic_50_diff", "hic_75_diff", "hic_95_diff")])
+  #x$mean_diff <- rowMeans(x[, 2:6])
+  #x[order(x$mean_diff), ]
 }
-
-#
-state_list = paste0("S", seq(1,20,1))
-state_table <- data.frame(state = paste0("S", seq(1,20,1)), 
-                          state.anno = c("NC-hom_low", "NC", "C-high", "NC-pan_low", "C-low", 
-                                         "WC", "C-mid", "NC-pyg_low", "WC", "C-mid",
-                                         "NC-pyg_low", "NC-hom_low", "NC", "NC", "NC-hom_high",
-                                         "NC-hom_low", "C-mid", "NC", "NC", "NC-gor_low"))
-state_table$state.anno.col <- state_anno_table[match(state_table$state.anno, state_anno_table$state.anno), "state.anno.col"]
-state_table <- cbind(state_table, t(col2rgb(state_table$state.anno.col)))
-# load 50kb bin annotation
-anno_table <- read.table(file = "result/hg38_50kb_anno.txt", header = T, comment.char = "", sep = '\t')
-colnames(anno_table)[1] <- "chrom"
-anno_table$bin_id = paste(anno_table$chrom, anno_table$start, anno_table$stop, sep = '_')
-chrom_list = c("1", "10", "11", "12", "14", "16", "17", "18", "8")
-
-for (chrom in chrom_list) {
-  phylo_mrf_analysis(chrom, state_table, anno_table)
-}
-
-# chromosome 1
-# conserved S3 (high),
-# conserved S5 (low)
-# conserved S7, S10, S17 (middle)
-# weakly conserved S6, S9
-# NC S1, S12, S16 (human-specific low)
-# NC S4 (chimp-sepcific low)
-# NC S8, S11 (bonobo-specific low)
-# NC S15 (human-specific high)
-# NC S20 (gorilla-specific low)
-# NC S2, S13, S14, S18, S19 (Un-conserved)
 ```
 
+## Synteny block distribution
+
+```{r}
+# load synteny blocks 
+synteny_bed = read.table(file = "result/hg38_50kb_synteny_block.bed", header = F, sep = '\t')
+colnames(synteny_bed) = c("chr", "start", "stop", "value1")
+max_num = max(synteny_bed$value1)
+# load linked synteny blocks
+synteny_link_1 = read.table(file = "result/hg38_50kb_synteny_block_link_1.bed", header = F, sep = '\t')
+colnames(synteny_link_1) = c("chr", "start", "stop", "value1")
+synteny_link_2 = read.table(file = "result/hg38_50kb_synteny_block_link_2.bed", header = F, sep = '\t')
+colnames(synteny_link_2) = c("chr", "start", "stop", "value1")
+#
+pdf(file = "figure/figure_global_synteny_blocks.pdf", width = 4, height = 4)
+circos.par(start.degree = 15, cell.padding = c(0, 0, 0, 0))
+circos.initializeWithIdeogram(plotType = c("ideogram", "labels"), 
+                              species='hg38', chromosome.index = paste0("chr", c(1:22)))
+text(0, 0, "hg38 autosomes\nPhylo-MRF", cex = 1)
+circos.genomicTrack(synteny_bed, ylim = c(0, max_num + 1),
+    panel.fun = function(region, value, ...) {
+        circos.genomicLines(region, value, type = "segment", lwd = 2, 
+            col = "#252525", ...)
+})
+circos.genomicLink(synteny_link_1, synteny_link_2, col = "lightgrey", border = NA)
+circos.clear()
+dev.off()
+#
+```
+
+## TADs boundaries vs state boundaries
+
+```{r}
+library(reshape2)
+library(ggplot2)
+#
+col_list <- c("0kb-50kb", "50kb-100kb", "100kb-150kb", "150kb-200kb", "> 200kb")
+group = 5
+#
+table_obv <- read.table(paste0("data/tad/estimate_interval", group, ".txt"), header = F)
+colnames(table_obv) <- col_list
+table_obv$group <- "obv"
+table_obv$tad <- c("Arrowhead", "DI")
+table_obv <- melt(table_obv, id.vars = c("group", "tad"), variable.name = "dis", value.name = "per")
+#
+table_shuffle_arrowhead <- read.table(paste0("data/tad/percentage_random_Arrowhead_interval", group, ".txt"), header = F)
+colnames(table_shuffle_arrowhead) <- col_list
+table_shuffle_arrowhead$group <- "shuffle"
+table_shuffle_arrowhead$tad <- "Arrowhead"
+table_shuffle_arrowhead <- melt(table_shuffle_arrowhead, id.vars = c("group", "tad"), variable.name = "dis", value.name = "per")
+#
+table_shuffle_DI <- read.table(paste0("data/tad/percentage_random_DI_interval", group, ".txt"), header = F)
+colnames(table_shuffle_DI) <- col_list
+table_shuffle_DI$group <- "shuffle"
+table_shuffle_DI$tad <- "DI"
+table_shuffle_DI <- melt(table_shuffle_DI, id.vars = c("group", "tad"), variable.name = "dis", value.name = "per")
+# 
+table <- rbind(table_obv, table_shuffle_arrowhead, table_shuffle_DI)
+table$dis <- factor(table$dis, levels = col_list)
+plot_state_boundary <- ggplot(subset(table, group == "shuffle"), aes(x = dis, y = per)) +
+  geom_violin(fill = "lightgrey", scale = "width") +
+  geom_point(data = subset(table, group == "obv"), aes(x = dis, y = per), col = "red") +
+  scale_y_continuous(labels = percent) +
+  xlab("") +
+  ylab("Percent") +
+  facet_wrap(~ tad, ncol = 1) +
+  my_theme +
+  theme(axis.text.x = element_text(size=rel(1.2),angle = 30, hjust = 1))
+pdf(file = "figure/figure_global_tad_boundary.pdf", width = 4, height = 6, useDingbats = F)
+print(plot_state_boundary)
+dev.off()
+```
+
+## State boundaries in each chromosome
+
+```{r}
+# load the boundary list
+table_boundary <- read.table(file = "data/phylo_MRF_output_global_V2/boundary/hg38_genome_boundary.bedpe", 
+                             header = F, sep = '\t', stringsAsFactors = F)
+colnames(table_boundary) <- c("chrom_1","start_1", "stop_1", "chrom_2", "start_2", "stop_2")
+# load TAD boundary
+tad_arrowhead <- read.table(file= "data/tad/TAD_GM12878.Arrowhead.25k.hg38.bedpe",
+                            header = F, sep = '\t', stringsAsFactors = F)
+colnames(tad_arrowhead) <- c("chrom_1","start_1", "stop_1", "chrom_2", "start_2", "stop_2")
+tad_arrowhead$size <- tad_arrowhead$stop_2 - tad_arrowhead$start_1
+tad_arrowhead$label <- "Arrowhead"
+tad_DI <- read.table(file = "data/tad/TAD_GM12878.DI.hg38.bedpe",
+                     header = F, sep = '\t', stringsAsFactors = F)
+colnames(tad_DI) <- c("chrom_1","start_1", "stop_1", "chrom_2", "start_2", "stop_2")
+tad_DI$size <- tad_DI$stop_2 - tad_DI$start_1
+tad_DI$label = "DI"
+# plot the size distribution of TADs
+tad_size <- rbind(tad_arrowhead, tad_DI)
+plot_tad_size <- ggplot(tad_size, aes(x = label, y = size/1000000, fill = label)) +
+  geom_violin(scale = "area") +
+  geom_boxplot(outlier.shape = NA, fill = "white", width = 0.15) +
+  coord_cartesian(ylim = c(0, 10)) +
+  #coord_flip(ylim = c(0,10000000)) +
+  #scale_y_continuous(expand = c(0,0)) +
+  xlab("") +
+  ylab("TADs size (1Mb)") +
+  my_theme
+pdf(file = paste0("figure/", "figure_global_tad_size.pdf"), width = 4, height = 7)
+print(plot_tad_size)
+dev.off()
+#
+chrom_list = seq(1,22,1)
+for (chrom in chrom_list) {
+  # add the synteny annotation
+  synteny_table <- read.table(file= paste0("data/phylo_MRF_output_global_V2/estimate/", "test", chrom, ".region.txt"), header = F, sep = '\t')
+  colnames(synteny_table) <- c("bin_count", "idx_start", "idx_stop", "size", "size_2", "start_bin", "start_bin_2")
+  synteny_table$start <- synteny_table$start_bin*hic_res
+  synteny_table$stop <- (synteny_table$start_bin + synteny_table$size)*hic_res
+  # take care of square
+  synteny_table$start_2 <- synteny_table$start_bin_2*hic_res
+  synteny_table$stop_2 <- (synteny_table$start_bin_2 + synteny_table$size_2)*hic_res
+  # 
+  synteny_table$synteny_id <- paste0("synteny_", seq(1,nrow(synteny_table),1))
+  # 
+  synteny_table$synteny_name <- paste0("Synteny block ", seq(1, nrow(synteny_table),1), ' (chr', chrom, ':', synteny_table$start/1000000, 'Mb', '-', synteny_table$stop/1000000, 'Mb)')
+  idx <- which(synteny_table$start_bin != synteny_table$start_bin_2)
+  synteny_table[idx, "synteny_name"] <- paste0("Synteny block ", idx, ' (chr', chrom, ':', synteny_table[idx, "start"]/1000000, 'Mb', '-', synteny_table[idx, "stop"]/1000000, 'Mb', ' chr', chrom, ':', synteny_table[idx, "start_2"]/1000000, 'Mb', '-', synteny_table[idx, "stop_2"]/1000000, 'Mb)')
+  # remove off-diagnals
+  synteny_table <- subset(synteny_table, start == start_2)
+  # 
+  pdf(file = paste0("figure/", "figure_chr", chrom, "_boundary.pdf"), width = 8, height = 4)
+  # curve
+  for (nn in seq(1, nrow(synteny_table))) {
+    data_link_boundary <- subset(table_boundary, chrom_1 == paste0("chr", chrom) & start_1 >= synteny_table[nn, "start"] & stop_2 <= synteny_table[nn, "stop"])
+    data_link_boundary$y_level <- 1
+    data_tad_arrowhead <- subset(tad_arrowhead, chrom_1 == paste0("chr", chrom) & start_1 >= synteny_table[nn, "start"] & stop_2 <= synteny_table[nn, "stop"])
+    data_tad_arrowhead$y_level <- 1
+    data_tad_DI <- subset(tad_DI, chrom_1 == paste0("chr", chrom) & start_1 >= synteny_table[nn, "start"] & stop_2 <= synteny_table[nn, "stop"])
+    data_tad_DI$y_level <- 1
+    data_link_boundary$label = "boundary"
+    data_tad_arrowhead$label = "Arrowhead"
+    data_tad_DI$label = "DI"
+    data <- rbind(data_link_boundary, data_tad_arrowhead, data_tad_DI)
+    data$label <- factor(data$label, levels = c("boundary", "Arrowhead", "DI"))
+    plot_boundary <- ggplot(subset(data, label != "boundary"), aes(x = start_1, y = y_level, xend = start_2, yend = y_level, col = label)) +
+      geom_curve(curvature = 1) +
+      geom_curve(data = subset(data, label == "boundary"), curvature = -1, col = "black") +
+      geom_hline(yintercept = 1.0) +
+      coord_cartesian(xlim = c(synteny_table[nn, "start"], synteny_table[nn, "stop"]),
+                      ylim = c(0, 2)) +
+      scale_x_continuous(expand = c(0,0)) +
+      scale_y_continuous(expand = c(0,0)) +
+      xlab("") +
+      ylab("") +
+      ggtitle(synteny_table[nn, "synteny_name"]) +
+      #facet_wrap(~ label, ncol = 1) +
+      my_theme
+    print(plot_boundary)
+  }
+  dev.off() 
+  # segment
+  pdf(file = paste0("figure/", "figure_chr", chrom, "_boundary_segment.pdf"), width = 8, height = 4)
+  for (nn in seq(1, nrow(synteny_table))) {
+    data_link_boundary <- subset(table_boundary, chrom_1 == paste0("chr", chrom) & start_1 >= synteny_table[nn, "start"] & stop_2 <= synteny_table[nn, "stop"])
+    data_link_boundary$y_level <- runif(nrow(data_link_boundary), min = 2.05, max = 2.95)
+    data_tad_arrowhead <- subset(tad_arrowhead, chrom_1 == paste0("chr", chrom) & start_1 >= synteny_table[nn, "start"] & stop_2 <= synteny_table[nn, "stop"])
+    data_tad_arrowhead$y_level <- runif(nrow(data_tad_arrowhead), min = 1.05, max = 1.95)
+    data_tad_DI <- subset(tad_DI, chrom_1 == paste0("chr", chrom) & start_1 >= synteny_table[nn, "start"] & stop_2 <= synteny_table[nn, "stop"])
+    data_tad_DI$y_level <- runif(nrow(data_tad_DI), min = 0.05, max = 0.95)
+    data_link_boundary$label = "boundary"
+    data_tad_arrowhead$label = "Arrowhead"
+    data_tad_DI$label = "DI"
+    data <- rbind(data_link_boundary, data_tad_arrowhead, data_tad_DI)
+    data$label <- factor(data$label, levels = c("boundary", "Arrowhead", "DI"))
+    # add random y level
+    plot_boundary <- ggplot(data, aes(x = start_1, y = y_level, xend = start_2, yend = y_level, col = label)) +
+      geom_curve(curvature = 0.0, size = 3) +
+      #geom_curve(data = subset(data, label == "boundary"), curvature = -1, col = "black") +
+      #geom_hline(yintercept = 1.0) +
+      coord_cartesian(xlim = c(synteny_table[nn, "start"], synteny_table[nn, "stop"]),
+                      ylim = c(0, 3)) +
+      scale_x_continuous(expand = c(0,0)) +
+      scale_y_continuous(expand = c(0,0)) +
+      xlab("") +
+      ylab("") +
+      ggtitle(synteny_table[nn, "synteny_name"]) +
+      #facet_wrap(~ label, ncol = 1) +
+      my_theme
+    print(plot_boundary)
+  }
+  dev.off() 
+}
+
+```
+
+## Pairwse interaction vs. A/B compartment
+
+```{r}
+library(plyr)
+library(ggplot2)
+library(scales)
+# load table
+dis_all <- read.table(file = "figure/figure_global_state_trend_per_synteny.AB.txt", 
+                      header = T, sep = '\t')
+dis_same <- read.table(file = "figure/figure_global_state_trend_per_synteny.AB.sameTAD.txt", 
+                       header = T, sep = '\t')
+dis_diff <- read.table(file = "figure/figure_global_state_trend_per_synteny.AB.diffTAD.txt",
+                       header = T, sep = '\t')
+# get the percentage of conserved
+# "C-high", "C-mid", "C-low", "WC"
+dis_all <- ddply(subset(dis_all, state_merge %in% c("C-high", "C-mid", "C-low", "WC")), .(dis, AB_label, per_AB, total), summarize, count = sum(count), per = sum(per))
+dis_all$group <- "all"
+dis_same <- ddply(subset(dis_same, state_merge %in% c("C-high", "C-mid", "C-low", "WC")), .(dis, AB_label, per_AB, total), summarize, count = sum(count), per = sum(per))
+dis_same$group <- "same"
+dis_diff <- ddply(subset(dis_diff, state_merge %in% c("C-high", "C-mid", "C-low", "WC")), .(dis, AB_label, per_AB, total), summarize, count = sum(count), per = sum(per))
+dis_diff$group <- "diff"
+dis_table <- rbind(dis_all, dis_same, dis_diff)
+# plot
+plot_dis <- ggplot(subset(dis_table, !is.na(AB_label) & total > 50), aes(x = dis/1000000, y = per, color = AB_label)) + 
+  geom_line(size = 2, alpha = 0.7) + 
+  #geom_point(pch = 21, fill = "white") +
+  scale_color_manual(values = c("AA" = "#fc8d62", "AB" = "#e78ac3", "BB" = "#8da0cb")) +
+  scale_y_continuous(labels = percent, 
+                     #expand = c(0,0),
+                     breaks = seq(0,1,0.1)) +
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(0, 10, 0.5)) +
+  coord_cartesian(xlim = c(0, 10), ylim = c(0.3,1)) +
+  xlab("Distance (Mb)") +
+  ylab("Percentage of conserved state") +
+  facet_wrap(~ group, ncol = 1) +
+  my_theme
+pdf(file = "figure/figure_global_state_trend_per_synteny.AB.merge.pdf", width = 8, height = 6)
+plot(plot_dis)
+dev.off()
+```
+
+## State vs. synteny blocks enrichment
+
+```{r}
+# load synteny blocks 
+synteny_bed = read.table(file = "data/phylo_MRF_output_global_V2/lenvec.txt", header = T, sep = '\t')
+synteny_bed$chr = paste0("chr", synteny_bed$chromosome)
+synteny_bed$start = synteny_bed$start1*hic_res
+synteny_bed$stop = synteny_bed$start + synteny_bed$window_size1*hic_res
+synteny_bed$name = paste0(synteny_bed$chr, ":", 
+                      synteny_bed$start/1000000, "Mb", 
+                      "-", 
+                      synteny_bed$stop/1000000, "Mb")
+# load state vs synteny blocks enrichment ratio
+table_enrich <- read.table(file = "data/phylo_MRF_output_global_V2/state_percentage/group/ratio1.10M.group.txt", header = F)
+colnames(table_enrich) <- c("id", "C-high", "C-mid", "C-low", "WC", "NC-hom_high", "NC-hom_low", "NC-pan_high", "NC-pan_low", "NC-pyg_high",  "NC-pyg_low", "NC-gor_high", "NC-gor_low", "NC")
+table_enrich$name <- synteny_bed[match(table_enrich$id, synteny_bed$synteny_id), "name"]
+matrix_enrich <- table_enrich[, c("C-high", "C-mid", "C-low", "WC", "NC-hom_high", "NC-hom_low", "NC-pan_high", "NC-pan_low", "NC-pyg_high",  "NC-pyg_low", "NC-gor_high", "NC-gor_low", "NC")]
+rownames(matrix_enrich) <- table_enrich$name
+colnames(matrix_enrich) <- state_anno_table$state.anno
+# load state vs synteny blocks pval
+table_pval <- read.table(file = "data/phylo_MRF_output_global_V2/state_percentage/group/pvalue_group_10M.txt", header = F)
+colnames(table_pval) <- c("C-high", "C-mid", "C-low", "WC", "NC-hom_high", "NC-hom_low", "NC-pan_high", "NC-pan_low", "NC-pyg_high",  "NC-pyg_low", "NC-gor_high", "NC-gor_low", "NC")
+rownames(table_pval) <- rownames(matrix_enrich)
+# convert ratio to NA if pval > 0.01
+matrix_enrich[table_pval>0.05] <- NA
+# plot the matrix
+col_heatmap_enrich_fc = colorRamp2(c(-1, 0, 1), c("#0571b0", "#f7f7f7", "#ca0020"))
+plot_ht_enrich <- Heatmap(log2(matrix_enrich), name = "enrich", 
+                          col = col_heatmap_enrich_fc, 
+                          cluster_rows = F, cluster_columns = F, 
+                          show_row_names = T, show_column_names = T, 
+                          #clustering_method_rows = clustering_method, 
+                          row_names_gp = gpar(fontsize = 6),
+                          column_names_gp  = gpar(fontsize = 7),
+                          width = 3)
+pdf(file="figure/figure_global_enrich.pdf", width=7, height=7)
+draw(plot_ht_enrich)
+dev.off()
+
+#
+table_enrich_melt <- melt(table_enrich, id.vars = c("id", "name"), variable.name = "group", value.name = "ratio")
+#
+col_list <- as.character(state_anno_table$state.anno.col)
+names(col_list) <- state_anno_table$state.anno
+#
+plot_global_enrichment <- ggplot(table_enrich_melt, aes(x = group, y = log2(ratio + 1), color = group)) +
+  geom_violin(scale = "width", fill = "white", color = "black") +
+  geom_jitter(height = 0, width = 0.1, alpha = 0.75, size = 1) +
+  xlab("") +
+  ylab("log2(1 + enrichment ratio)") +
+  scale_color_manual(values = col_list) +
+  my_theme +
+  theme(axis.text.x = element_text(size=rel(1.2), color="black", angle = 45, hjust = 1))
+pdf(file = "figure/figure_global_state_group_vs_synteny_block.pdf", width = 7, height = 4)
+print(plot_global_enrichment)
+dev.off()
+```
+
+## Repeatitive elements vs. state
+
+```{r}
+## load the ratio data ----------------
+# human
+repeat_table_human <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/rmsk_hg38_align.2.union.merge.normalize.txt", 
+                                 header = T, 
+                                 check.names = F)
+repeat_family_list_all <- colnames(repeat_table_human)[-(1:2)]
+repeat_table_human$spe <- "human"
+repeat_table_human <- melt(repeat_table_human, id.vars = c("state", "spe", "num"),
+                           variable.name = "repeat_family",
+                           value.name = "ratio")
+# chimp
+repeat_table_chimp <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/rmsk_panTro5_align.2.union.merge.normalize.txt", 
+                                 header = T, 
+                                 check.names = F)
+repeat_table_chimp$spe <- "chimp"
+repeat_table_chimp <- melt(repeat_table_chimp, id.vars = c("state", "spe", "num"),
+                           variable.name = "repeat_family",
+                           value.name = "ratio")
+# bonobo
+repeat_table_bonobo <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/rmsk_panPan2_align.2.union.merge.normalize.txt", 
+                                  header = T, 
+                                  check.names = F)
+repeat_table_bonobo$spe <- "bonobo"
+repeat_table_bonobo <- melt(repeat_table_bonobo, id.vars = c("state", "spe", "num"),
+                           variable.name = "repeat_family",
+                           value.name = "ratio")
+# gorilla
+repeat_table_gorilla <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/rmsk_gorGor4_align.2.union.merge.normalize.txt", 
+                                   header = T, 
+                                   check.names = F)
+repeat_table_gorilla$spe <- "gorilla"
+repeat_table_gorilla <- melt(repeat_table_gorilla, id.vars = c("state", "spe", "num"),
+                           variable.name = "repeat_family",
+                           value.name = "ratio")
+# merge
+repeat_table <- rbind(repeat_table_human, 
+                      repeat_table_chimp, 
+                      repeat_table_bonobo, 
+                      repeat_table_gorilla)
+## 
+## load the pvalue data-----
+# human
+repeat_pval_human <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/pvalue/rmsk_hg38_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(repeat_pval_human) <- repeat_family_list_all
+repeat_pval_human$state <- seq(1, 30, 1)
+repeat_pval_human$spe <- "human"
+repeat_pval_human <- melt(repeat_pval_human, id.vars = c("state", "spe"),
+                           variable.name = "repeat_family",
+                           value.name = "pval")
+# chimp
+repeat_pval_chimp <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/pvalue/rmsk_panTro5_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(repeat_pval_chimp) <- repeat_family_list_all
+repeat_pval_chimp$state <- seq(1, 30, 1)
+repeat_pval_chimp$spe <- "chimp"
+repeat_pval_chimp <- melt(repeat_pval_chimp, id.vars = c("state", "spe"),
+                           variable.name = "repeat_family",
+                           value.name = "pval")
+# bonobo
+repeat_pval_bonobo <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/pvalue/rmsk_panPan2_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(repeat_pval_bonobo) <- repeat_family_list_all
+repeat_pval_bonobo$state <- seq(1, 30, 1)
+repeat_pval_bonobo$spe <- "bonobo"
+repeat_pval_bonobo <- melt(repeat_pval_bonobo, id.vars = c("state", "spe"),
+                           variable.name = "repeat_family",
+                           value.name = "pval")
+# gorilla
+repeat_pval_gorilla <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/pvalue/rmsk_gorGor4_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(repeat_pval_gorilla) <- repeat_family_list_all
+repeat_pval_gorilla$state <- seq(1, 30, 1)
+repeat_pval_gorilla$spe <- "gorilla"
+repeat_pval_gorilla <- melt(repeat_pval_gorilla, id.vars = c("state", "spe"),
+                           variable.name = "repeat_family",
+                           value.name = "pval")
+repeat_pval_table <- rbind(repeat_pval_human, 
+                           repeat_pval_chimp,
+                           repeat_pval_bonobo,
+                           repeat_pval_gorilla)
+## merge ratio and pvalue table----
+repeat_table <- merge(repeat_table, repeat_pval_table, by = c("state", "spe", "repeat_family"))
+## load the repeat family repeat class table --------
+repeat_meta <- read.table(file = "data/repeat_family2class.txt", 
+                            header = T, 
+                            check.names = F,
+                            stringsAsFactors = F)
+
+# filter '?'
+repeat_meta <- repeat_meta[-grep('\\?', repeat_meta$repeat_family),]
+# filter 'Unknown' repeat class
+repeat_meta <- subset(repeat_meta, repeat_class != 'Unknown')
+#
+repeat_meta$repeat_class <- factor(repeat_meta$repeat_class, levels = unique(repeat_meta$repeat_class)) 
+# order 
+repeat_meta <- repeat_meta[with(repeat_meta, order(repeat_class, repeat_family)), ]
+## intersect -----
+repeat_family_list <- intersect(Reduce(intersect, list(repeat_table_human$repeat_family, 
+                       repeat_table_chimp$repeat_family,
+                       repeat_table_bonobo$repeat_family,
+                       repeat_table_gorilla$repeat_family)),
+          c(repeat_meta$repeat_family, paste0(repeat_meta$repeat_family, ".len")))
+repeat_table <- subset(repeat_table, repeat_family %in% repeat_family_list)
+# reset the order of repeat family
+repeat_table$repeat_family <- factor(repeat_table$repeat_family, levels = repeat_family_list)
+# reset the state spe combination
+repeat_table$name <- paste0("S", repeat_table$state, '-', repeat_table$spe)
+group_list <- c()
+group_col_list <- c()
+for (nn in seq(nrow(state_table_sorted_by_group))) {
+  group_list <- c(group_list, 
+                  c(paste0(state_table_sorted_by_group[nn, "state"], '-', 'human'),
+                    paste0(state_table_sorted_by_group[nn, "state"], '-', 'chimp'), 
+                    paste0(state_table_sorted_by_group[nn, "state"], '-', 'bonobo'),
+                    paste0(state_table_sorted_by_group[nn, "state"], '-', 'gorilla')
+                  )
+  )
+  group_col_list <- c(group_col_list, 
+                  rep(as.character(state_table_sorted_by_group[nn, "state.anno.col"]), 4) 
+  )
+}
+names(group_col_list) <- group_list
+repeat_table$name <- factor(repeat_table$name, levels = group_list)
+# convert ratio to NA if fdr > 0.01
+repeat_table$fdr <- p.adjust(repeat_table$pval, method = "BH")
+repeat_table[which(repeat_table$fdr > 0.01), 'ratio'] <- NA
+# finally build the matrix
+repeat_table_matrix <- dcast(repeat_table, 
+           name ~ repeat_family, 
+           value.var = "ratio", 
+           mean)
+repeat_table_freq <- repeat_table_matrix[, repeat_meta$repeat_family]
+rownames(repeat_table_freq) <- repeat_table_matrix$name
+repeat_table_len <- repeat_table_matrix[, paste0(repeat_meta$repeat_family, ".len")]
+rownames(repeat_table_len) <- repeat_table_matrix$name
+## plot ----
+# parameter
+clustering_method = "single"
+#col_heatmap_repeat_fc = colorRamp2(c(-0.8, 0, 0.8), c("#0571b0", "#f7f7f7", "#ca0020"))
+col_heatmap_repeat_fc = colorRamp2(c(0.5, 1, 2), c("#0571b0", "#f7f7f7", "#ca0020"))
+# column and row annotation
+row_anno <- HeatmapAnnotation(group = group_list, 
+                              col = list(group = group_col_list),
+                              which = "row", show_legend = F)
+repeat_class_list <- as.character(repeat_meta$repeat_class)
+color = "grey"
+repeat_class_col_list <- c(color)
+for (nn in seq(2, length(repeat_class_list))) {
+  if (repeat_class_list[nn] != repeat_class_list[nn-1]) {
+    if (repeat_class_col_list[length(repeat_class_col_list)] == "grey") {
+      color = "white"
+    } else {
+      color = "grey"
+    }
+  }
+  repeat_class_col_list <- c(repeat_class_col_list, color)
+}
+names(repeat_class_col_list) <- repeat_class_list
+col_anno <- HeatmapAnnotation(class = repeat_class_list, 
+                              col = list(class = repeat_class_col_list))
+# 
+plot_ht_repeat_len <- Heatmap(repeat_table_len, name = "repeat len", 
+                          col = col_heatmap_repeat_fc, 
+                          cluster_rows = F, cluster_columns = F, 
+                          show_row_names = T, show_column_names = T, 
+                          #clustering_method_rows = clustering_method, 
+                          row_names_gp = gpar(fontsize = 6),
+                          column_names_gp  = gpar(fontsize = 7),
+                          top_annotation = col_anno, 
+                          width = 3)
+plot_ht_repeat_len <- row_anno + plot_ht_repeat_len
+plot_ht_repeat_count <- Heatmap(repeat_table_freq, name = "repeat count", 
+                          col = col_heatmap_repeat_fc, 
+                          cluster_rows = F, cluster_columns = F, 
+                          show_row_names = T, show_column_names = T,
+                          #clustering_method_rows = clustering_method, 
+                          row_names_gp = gpar(fontsize = 6),
+                          column_names_gp  = gpar(fontsize = 7),
+                          top_annotation = col_anno,
+                          width = 3)
+plot_ht_repeat_count <- row_anno + plot_ht_repeat_count
+pdf(file="figure/figure_global_repeat.pdf", width=7, height=7)
+draw(plot_ht_repeat_len)
+draw(plot_ht_repeat_count)
+dev.off()
+```
+
+## motif vs. state
+
+```{r}
+## load the ratio data -----
+# human
+motif_table_human <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_hg38_align.union.merge.normalize.txt", 
+                                 header = T, 
+                                 check.names = F)
+motif_list_all <- colnames(motif_table_human)[-(1:2)]
+motif_table_human$spe <- "human"
+motif_table_human <- melt(motif_table_human, id.vars = c("state", "spe", "num"),
+                           variable.name = "motif_id",
+                           value.name = "ratio")
+# chimp
+motif_table_chimp <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_panTro5_align.union.merge.normalize.txt", 
+                                 header = T, 
+                                 check.names = F)
+motif_table_chimp$spe <- "chimp"
+motif_table_chimp <- melt(motif_table_chimp, id.vars = c("state", "spe", "num"),
+                           variable.name = "motif_id",
+                           value.name = "ratio")
+# bonobo
+motif_table_bonobo <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_panPan2_align.union.merge.normalize.txt", 
+                                  header = T, 
+                                  check.names = F)
+motif_table_bonobo$spe <- "bonobo"
+motif_table_bonobo <- melt(motif_table_bonobo, id.vars = c("state", "spe", "num"),
+                           variable.name = "motif_id",
+                           value.name = "ratio")
+# gorilla
+motif_table_gorilla <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_gorGor4_align.union.merge.normalize.txt", 
+                                   header = T, 
+                                   check.names = F)
+motif_table_gorilla$spe <- "gorilla"
+motif_table_gorilla <- melt(motif_table_gorilla, id.vars = c("state", "spe", "num"),
+                           variable.name = "motif_id",
+                           value.name = "ratio")
+# merge
+motif_table <- rbind(motif_table_human, 
+                      motif_table_chimp, 
+                      motif_table_bonobo, 
+                      motif_table_gorilla)
+## load the pvalue data----
+# human
+motif_pval_human <- read.table(file = "data/phylo_MRF_output_global_V2/motif/pvalue/motif_hg38_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(motif_pval_human) <- motif_list_all
+motif_pval_human$state <- seq(1, 30, 1)
+motif_pval_human$spe <- "human"
+motif_pval_human <- melt(motif_pval_human, id.vars = c("state", "spe"),
+                           variable.name = "motif_id",
+                           value.name = "pval")
+# chimp
+motif_pval_chimp <- read.table(file = "data/phylo_MRF_output_global_V2/motif/pvalue/motif_panTro5_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(motif_pval_chimp) <- motif_list_all
+motif_pval_chimp$state <- seq(1, 30, 1)
+motif_pval_chimp$spe <- "chimp"
+motif_pval_chimp <- melt(motif_pval_chimp, id.vars = c("state", "spe"),
+                           variable.name = "motif_id",
+                           value.name = "pval")
+# bonobo
+motif_pval_bonobo <- read.table(file = "data/phylo_MRF_output_global_V2/motif/pvalue/motif_panPan2_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(motif_pval_bonobo) <- motif_list_all
+motif_pval_bonobo$state <- seq(1, 30, 1)
+motif_pval_bonobo$spe <- "bonobo"
+motif_pval_bonobo <- melt(motif_pval_bonobo, id.vars = c("state", "spe"),
+                           variable.name = "motif_id",
+                           value.name = "pval")
+# gorilla
+motif_pval_gorilla <- read.table(file = "data/phylo_MRF_output_global_V2/motif/pvalue/motif_gorGor4_align.union.feature.merge.chi2.txt", 
+                                 header = F, 
+                                 check.names = F)
+colnames(motif_pval_gorilla) <- motif_list_all
+motif_pval_gorilla$state <- seq(1, 30, 1)
+motif_pval_gorilla$spe <- "gorilla"
+motif_pval_gorilla <- melt(motif_pval_gorilla, id.vars = c("state", "spe"),
+                           variable.name = "motif_id",
+                           value.name = "pval")
+motif_pval_table <- rbind(motif_pval_human,
+                          motif_pval_chimp,
+                          motif_pval_bonobo,
+                          motif_pval_gorilla)
+## merge ratio and pvalue table
+motif_table <- merge(motif_table, motif_pval_table, by = c("state", "spe", "motif_id"))
+## intersect with motif annotation-----
+motif_anno <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_names_1.txt",
+                         header = F,
+                         sep = '\t')
+colnames(motif_anno) <- c("motif_id", "tf")
+motif_table$tf <- motif_anno$tf[match(motif_table$motif_id, motif_anno$motif_id)]
+motif_table$motif_name <- paste0(motif_table$tf,
+                                 '_',
+                                 motif_table$motif_id)
+## filter motif by ratio------
+motif_table$ratio_filter <- motif_table$ratio
+#motif_table[which(motif_table$ratio >= 0.5 & motif_table$ratio <= 2), "ratio_filter"] = NA
+## intersect set the order of state------
+motif_table$name <- paste0("S", motif_table$state, '-', motif_table$spe)
+group_list <- c()
+group_col_list <- c()
+for (nn in seq(nrow(state_table_sorted_by_group))) {
+  group_list <- c(group_list, 
+                  c(paste0(state_table_sorted_by_group[nn, "state"], '-', 'human'),
+                    paste0(state_table_sorted_by_group[nn, "state"], '-', 'chimp'), 
+                    paste0(state_table_sorted_by_group[nn, "state"], '-', 'bonobo'),
+                    paste0(state_table_sorted_by_group[nn, "state"], '-', 'gorilla')
+                  )
+  )
+  group_col_list <- c(group_col_list, 
+                  rep(as.character(state_table_sorted_by_group[nn, "state.anno.col"]), 4) 
+  )
+}
+names(group_col_list) <- group_list
+motif_table$name <- factor(motif_table$name, levels = group_list)
+## convert ratio to NA if FDR > 0.01
+motif_table$fdr <- p.adjust(motif_table$pval, method = "BH")
+motif_table[which(motif_table$fdr > 0.05), "ratio_filter"] <- NA
+## build the final matrix-------
+motif_table_matrix <- dcast(motif_table, 
+           name ~ motif_name, 
+           value.var = "ratio_filter", 
+           mean)
+motif_table_matrix <- motif_table_matrix[,colSums(is.na(motif_table_matrix))<nrow(motif_table_matrix)]
+rownames(motif_table_matrix) <- motif_table_matrix[, 1]
+motif_table_matrix[, 1] <- NULL
+# filter columns that the max ratio is < 1.5
+motif_pass_list <- colnames(motif_table_matrix)[apply(motif_table_matrix, 2, function (x) max(x, na.rm = T)) >= 1.2]
+## plot------
+# parameter
+clustering_method = "single"
+#col_heatmap_repeat_fc = colorRamp2(c(-0.8, 0, 0.8), c("#0571b0", "#f7f7f7", "#ca0020"))
+col_heatmap_repeat_fc = colorRamp2(c(0.8, 1, 1.5), c("#0571b0", "#f7f7f7", "#ca0020"))
+# column and row annotation
+row_anno <- HeatmapAnnotation(group = group_list, 
+                              col = list(group = group_col_list),
+                              which = "row", show_legend = F)
+# 
+plot_ht_motif <- Heatmap(motif_table_matrix[, motif_pass_list], name = "motif", 
+                          col = col_heatmap_repeat_fc, 
+                          cluster_rows = F, cluster_columns = T, 
+                          show_row_names = T, show_column_names = T, 
+                          clustering_method_rows = clustering_method, 
+                          row_names_gp = gpar(fontsize = 6),
+                          column_names_gp  = gpar(fontsize = 3),
+                          width = 3)
+plot_ht_motif <- row_anno + plot_ht_motif
+pdf(file="figure/figure_global_motif.pdf", width=7, height=7)
+draw(plot_ht_motif)
+dev.off()
+```
+
+## off-diagnal TADs
+
+```{r}
+# load data----
+table_tad_repeat <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/tad/rmsk_hg38_align.DI.thresh10.normalize.txt", 
+                               header = T,
+                               sep = '\t',
+                               check.names = F)
+table_tad_repeat_merge <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/tad/rmsk_hg38_align.DI.thresh10.normalize.merge.txt", 
+                               header = T,
+                               sep = '\t',
+                               check.names = F)
+table_tad_motif <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_hg38_align.Arrowhead.thresh10.normalize.local.txt",
+                              header = T,
+                              sep = '\t',
+                              check.names = F)
+table_tad_motif_merge <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_hg38_align.DI.thresh10.normalize.merge.local.txt",
+                              header = T,
+                              sep = '\t',
+                              check.names = F)
+# skip columns with zero count/length in background----
+table_tad_motif <- table_tad_motif[, colnames(table_tad_motif_merge)[colSums(table_tad_motif_merge) > 0]]
+## filter tad with too small size
+table_tad_motif$size <- table_tad_motif$stop - table_tad_motif$start
+## for each motif, run wilcox rank-sum test and calculate pvalue----
+tad_motif_pass_list = c()
+tad_motif_pass_pval = c()
+tad_motif_pass_fc = c()
+for (col in colnames(table_tad_motif)[5:ncol(table_tad_motif)]) {
+  group_nonconserved <- log2(table_tad_motif[which(table_tad_motif$serial == 0), col])
+  group_conserved <- log2(table_tad_motif[which(table_tad_motif$serial == 1), col])
+  group_nonconserved <- group_nonconserved[!is.na(group_nonconserved) & is.finite(group_nonconserved)]
+  group_conserved <- group_conserved[!is.na(group_conserved) & is.finite(group_conserved)]
+  if (length(group_nonconserved) > 2 & length(group_conserved) > 2) {
+    pval <- wilcox.test(group_nonconserved, group_conserved)
+    if (pval$p.value < 0.05) {
+      tad_motif_pass_list <- c(tad_motif_pass_list, col)
+      tad_motif_pass_pval <- c(tad_motif_pass_pval, pval$p.value)
+      tad_motif_pass_fc <- c(tad_motif_pass_fc, mean(group_nonconserved, na.rm =T) - mean(group_conserved, na.rm = T))
+    }
+  }
+}
+tad_motif_pass <- data.frame(motif_id = tad_motif_pass_list, 
+                             pval = tad_motif_pass_pval, 
+                             fc = tad_motif_pass_fc)
+## melt----
+table_tad_motif <- melt(table_tad_motif, 
+                        id.vars = c("chrom", "start", "stop", "serial"), 
+                        variable.name = "motif_id", 
+                        value.name = "ratio")
+## intersect with motif annotation-----
+motif_anno <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_names_1.txt",
+                         header = F,
+                         sep = '\t')
+colnames(motif_anno) <- c("motif_id", "tf")
+## plot motif ----
+table_tad_motif$tf <- motif_anno$tf[match(table_tad_motif$motif_id, motif_anno$motif_id)]
+table_tad_motif$motif_name <- paste0(table_tad_motif$tf,
+                                 '_',
+                                 table_tad_motif$motif_id)
+table_tad_motif$group <- ifelse(table_tad_motif$serial == 0, 'N', 'C')
+table_tad_motif$log2_ratio <- log2(table_tad_motif$ratio)
+tad_motif_pass_enrich <- subset(tad_motif_pass, fc > log2(1.15))
+tad_motif_pass_deplete <- subset(tad_motif_pass, fc < - log2(1.1))
+plot_tad_motif_enrich <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif_pass_enrich$motif_id), 
+       aes(x = motif_name, 
+           y = log2_ratio, 
+           color = group)) +
+  geom_hline(yintercept = 0.0) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
+             alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.8) +
+  xlab("") +
+  ylab("log2 enrichment ratio") +
+  ggtitle("Nonconserved enriched") +
+  coord_cartesian(ylim = c(-2, 2)) +
+  my_theme +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+plot_tad_motif_deplete <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif_pass_deplete$motif_id), 
+       aes(x = motif_name, 
+           y = log2_ratio, 
+           color = group)) +
+  geom_hline(yintercept = 0.0) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
+             alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.8) +
+  xlab("") +
+  ylab("log2 enrichment ratio") +
+  ggtitle("Conserved enriched") +
+  coord_cartesian(ylim = c(-4, 4)) +
+  my_theme +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+## for each repeat family, run wilcox rank-sum test and calculate pvalue----
+tad_repeat_pass_list = c()
+tad_repeat_pass_pval = c()
+tad_repeat_pass_fc = c()
+for (col in colnames(table_tad_repeat)[5:ncol(table_tad_repeat)]) {
+  group_nonconserved <- log2(table_tad_repeat[which(table_tad_repeat$serial == 0), col])
+  group_conserved <- log2(table_tad_repeat[which(table_tad_repeat$serial == 1), col])
+  group_nonconserved <- group_nonconserved[!is.na(group_nonconserved) & is.finite(group_nonconserved)]
+  group_conserved <- group_conserved[!is.na(group_conserved) & is.finite(group_conserved)]
+  if (length(group_nonconserved) > 2 & length(group_conserved) > 2) {
+    pval <- wilcox.test(group_nonconserved, group_conserved)
+    if (pval$p.value < 0.05 & !is.na(pval$p.value)) {
+      tad_repeat_pass_list <- c(tad_repeat_pass_list, col)
+      tad_repeat_pass_pval <- c(tad_repeat_pass_pval, pval$p.value)
+      tad_repeat_pass_fc <- c(tad_repeat_pass_fc, mean(group_nonconserved, na.rm =T) - mean(group_conserved, na.rm = T))
+    }
+  }
+}
+tad_repeat_pass <- data.frame(repeat_family = tad_repeat_pass_list, 
+                             pval = tad_repeat_pass_pval, 
+                             fc = tad_repeat_pass_fc)
+## melt----
+table_tad_repeat <- melt(table_tad_repeat, 
+                        id.vars = c("chrom", "start", "stop", "serial"), 
+                        variable.name = "repeat_family", 
+                        value.name = "ratio")
+## plot repeat ----
+table_tad_repeat$group <- ifelse(table_tad_repeat$serial == 0, 'N', 'C')
+table_tad_repeat$log2_ratio <- log2(table_tad_repeat$ratio)
+tad_repeat_pass_enrich <- subset(tad_repeat_pass, fc > log2(1.15))
+tad_repeat_pass_deplete <- subset(tad_repeat_pass, fc < -log2(1.15))
+plot_tad_repeat_enrich <- ggplot(subset(table_tad_repeat, repeat_family %in% tad_repeat_pass_enrich$repeat_family), 
+       aes(x = repeat_family, 
+           y = log2_ratio, 
+           color = group)) +
+  geom_hline(yintercept = 0.0) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
+             alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.8) +
+  xlab("") +
+  ylab("log2 enrichment ratio") +
+  ggtitle("Nonconserved enriched") +
+  coord_cartesian(ylim = c(-20, 20)) +
+  my_theme +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+plot_tad_repeat_deplete <- ggplot(subset(table_tad_repeat, repeat_family %in% tad_repeat_pass_deplete$repeat_family), 
+       aes(x = repeat_family, 
+           y = log2_ratio, 
+           color = group)) +
+  geom_hline(yintercept = 0.0) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
+             alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.8) +
+  xlab("") +
+  ylab("log2 enrichment ratio") +
+  ggtitle("Conserved enriched") +
+  coord_cartesian(ylim = c(-4, 20)) +
+  my_theme +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+### final plot
+pdf(file = "figure/figure_global_off_diagnal_tad_motif.pdf", width = 8, height =5)
+print(plot_tad_motif_enrich)
+print(plot_tad_motif_deplete)
+dev.off()
+pdf(file = "figure/figure_global_off_diagnal_tad_repeat.pdf", width = 8, height =5)
+print(plot_tad_repeat_enrich)
+print(plot_tad_repeat_deplete)
+dev.off()
+```
 

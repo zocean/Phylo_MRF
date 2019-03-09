@@ -1015,7 +1015,7 @@ dev.off()
 ```{r}
 min_TAD_size_cutoff = 100000
 ## load motif data----
-table_tad_motif <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_hg38_align.DI.thresh10.normalize.local.txt",
+table_tad_motif <- read.table(file = "data/phylo_MRF_output_global_V2/motif/tad/percentage/motif_hg38_align.DI.thresh10.local.percentage.txt",
                               header = T,
                               sep = '\t',
                               check.names = F)
@@ -1023,38 +1023,79 @@ table_tad_motif_merge <- read.table(file = "data/phylo_MRF_output_global_V2/moti
                               header = T,
                               sep = '\t',
                               check.names = F)
-## add group----
-table_tad_motif$serial <- ifelse(table_tad_motif$serial == 0, 'N', 'C')
+table_tad_motif_merge_pval <- read.table(file = "data/phylo_MRF_output_global_V2/motif/tad/motif_hg38_align.DI.thresh10.chi2.txt",
+                              header = F,
+                              sep = '\t',
+                              check.names = F)
+table_tad_motif_merge_pval <- cbind(table_tad_motif_merge[, 1:4], table_tad_motif_merge_pval)
+colnames(table_tad_motif_merge_pval) <- colnames(table_tad_motif_merge)
 ## filter tad with too small size----
 table_tad_motif$size <- table_tad_motif$stop - table_tad_motif$start
 table_tad_motif <- subset(table_tad_motif, size > min_TAD_size_cutoff)
+table_tad_motif$size <- NULL
 ## skip columns with zero count/length in background----
 table_tad_motif <- table_tad_motif[, colnames(table_tad_motif_merge)[colSums(table_tad_motif_merge, na.rm = T) > 0]]
-## change ratio = 0 to the minal ratio observed----
-#motif_min <- unlist(table_tad_motif[, 4:ncol(table_tad_motif)])
-#motif_min <- motif_min[motif_min!=0] 
-#motif_min <- min(motif_min)
-#table_tad_motif[table_tad_motif < 1e-16] <- motif_min
+table_tad_motif_merge <- table_tad_motif_merge[, colnames(table_tad_motif_merge)[colSums(table_tad_motif_merge, na.rm = T) > 0]]
+table_tad_motif_merge_pval <- table_tad_motif_merge_pval[, colnames(table_tad_motif_merge)[colSums(table_tad_motif_merge, na.rm = T) > 0]]
+## intersect with motif annotation-----
+motif_anno <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_names_1.txt",
+                         header = F,
+                         sep = '\t')
+colnames(motif_anno) <- c("motif_id", "tf")
+#######
+## plot motif merged----
+rownames(table_tad_motif_merge) <- ifelse(table_tad_motif_merge$serial == 0, 'N', 'C')
+# add row & col name for pval data.frame
+rownames(table_tad_motif_merge_pval) <- rownames(table_tad_motif_merge)
+# transpose the data.frame
+table_tad_motif_merge <- as.data.frame(t(table_tad_motif_merge[, 4:ncol(table_tad_motif_merge)]))
+table_tad_motif_merge$motif_id <- rownames(table_tad_motif_merge)
+table_tad_motif_merge$tf <- motif_anno$tf[match(table_tad_motif_merge$motif_id, motif_anno$motif_id)]
+table_tad_motif_merge$motif_name <- paste0(table_tad_motif_merge$tf,
+                                 '_',
+                                 table_tad_motif_merge$motif_id)
+table_tad_motif_merge_pval <- as.data.frame(t(table_tad_motif_merge_pval[, 4:ncol(table_tad_motif_merge_pval)]))
+table_tad_motif_merge_pval$motif_id <- rownames(table_tad_motif_merge_pval)
+table_tad_motif_merge <- merge(table_tad_motif_merge, table_tad_motif_merge_pval,
+                               by = "motif_id", suffixes = c(".ratio", ".pval"))
+table_tad_motif_merge$log10_pval_C <- -log10(table_tad_motif_merge$C.pval + 2.2e-16)
+# select motif id
+selected_motif <- subset(table_tad_motif_merge, log10_pval_C > 2 & (C.ratio < 0.85 | C.ratio > 1.15))
+plot_tad_motif_merge <- ggplot(table_tad_motif_merge, aes(x = C.ratio, y = log10_pval_C)) +
+  geom_point(alpha = 0.8, pch = 21, fill = "grey") +
+  geom_point(data = subset(table_tad_motif_merge, log10_pval_C > 2 & (C.ratio < 0.85 | C.ratio > 1.15)),  
+             aes(x = C.ratio, y = log10_pval_C), color = "red") +
+  geom_text_repel(data = subset(table_tad_motif_merge, log10_pval_C > 2 & (C.ratio < 0.85 | C.ratio > 1.15)), 
+            aes(x = C.ratio, y = log10_pval_C, label = tf), 
+            size = 4,
+            vjust = 0.5) +
+  geom_hline(yintercept = 0.0) +
+  geom_hline(yintercept = 2.0, linetype = 2, color = "darkgrey") +
+  geom_vline(xintercept = 1.0) +
+  coord_cartesian(ylim = c(0, 17), xlim = c(0.4, 1.6)) +
+  xlab("Ratio (Conserved TADs)") +
+  ylab("-log10(P value)") +
+  my_theme
+## add group -----
+table_tad_motif$serial <- ifelse(table_tad_motif$serial == 0, 'N', 'C')
 ## for each motif, run wilcox rank-sum test and calculate pvalue----
 tad_motif_pass_list = c()
 tad_motif_pass_pval = c()
 tad_motif_pass_fc = c()
 tad_motif_pass_median_n = c()
 tad_motif_pass_median_c = c()
-for (col in colnames(table_tad_motif)[4:ncol(table_tad_motif)]) {
-  group_nonconserved <- log2(table_tad_motif[which(table_tad_motif$serial == 'N'), col])
-  group_conserved <- log2(table_tad_motif[which(table_tad_motif$serial == 'C'), col])
+for (col in selected_motif$motif_id) {
+  group_nonconserved <- table_tad_motif[which(table_tad_motif$serial == 'N'), col]
+  group_conserved <- table_tad_motif[which(table_tad_motif$serial == 'C'), col]
   group_nonconserved <- group_nonconserved[!is.na(group_nonconserved) & is.finite(group_nonconserved)]
   group_conserved <- group_conserved[!is.na(group_conserved) & is.finite(group_conserved)]
   if (length(group_nonconserved) > 2 & length(group_conserved) > 2) {
     pval <- wilcox.test(group_nonconserved, group_conserved)
-    if (pval$p.value < 0.05) {
-      tad_motif_pass_list <- c(tad_motif_pass_list, col)
-      tad_motif_pass_pval <- c(tad_motif_pass_pval, pval$p.value)
-      tad_motif_pass_fc <- c(tad_motif_pass_fc, median(group_nonconserved, na.rm =T) - median(group_conserved, na.rm = T))
-      tad_motif_pass_median_n <- c(tad_motif_pass_median_n, median(group_nonconserved, na.rm =T))
-      tad_motif_pass_median_c <- c(tad_motif_pass_median_c, median(group_conserved, na.rm = T))
-    }
+    tad_motif_pass_list <- c(tad_motif_pass_list, col)
+    tad_motif_pass_pval <- c(tad_motif_pass_pval, pval$p.value)
+    tad_motif_pass_fc <- c(tad_motif_pass_fc, median(group_nonconserved, na.rm =T) - median(group_conserved, na.rm = T))
+    tad_motif_pass_median_n <- c(tad_motif_pass_median_n, median(group_nonconserved, na.rm =T))
+    tad_motif_pass_median_c <- c(tad_motif_pass_median_c, median(group_conserved, na.rm = T))
   }
 }
 tad_motif_pass <- data.frame(motif_id = tad_motif_pass_list, 
@@ -1066,107 +1107,56 @@ tad_motif_pass <- data.frame(motif_id = tad_motif_pass_list,
 table_tad_motif <- melt(table_tad_motif, 
                         id.vars = c("chrom", "stop", "serial"), 
                         variable.name = "motif_id", 
-                        value.name = "ratio")
-table_tad_motif$ratio <- as.numeric(table_tad_motif$ratio)
-## intersect with motif annotation-----
-motif_anno <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_names_1.txt",
-                         header = F,
-                         sep = '\t')
-colnames(motif_anno) <- c("motif_id", "tf")
+                        value.name = "per")
+table_tad_motif$per <- as.numeric(table_tad_motif$per)
+## plot motif ----
 table_tad_motif$tf <- motif_anno$tf[match(table_tad_motif$motif_id, motif_anno$motif_id)]
 table_tad_motif$motif_name <- paste0(table_tad_motif$tf,
                                  '_',
                                  table_tad_motif$motif_id)
-## plot motif ----
 table_tad_motif$group <- table_tad_motif$serial
-table_tad_motif$log2_ratio <- log2(table_tad_motif$ratio)
-tad_motif_pass_enrich <- subset(tad_motif_pass, fc > log2(1.2))
-tad_motif_pass_deplete <- subset(tad_motif_pass, fc < - log2(1.2))
-plot_tad_motif_enrich <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif_pass_enrich$motif_id), 
-       aes(x = motif_name, 
-           y = log2_ratio, 
-           color = group)) +
-  geom_hline(yintercept = 0.0) +
-  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
-  xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Nonconserved enriched") +
-  coord_cartesian(ylim = c(-4, 4)) +
-  my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-plot_tad_motif_deplete <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif_pass_deplete$motif_id), 
-       aes(x = motif_name, 
-           y = log2_ratio, 
-           color = group)) +
-  geom_hline(yintercept = 0.0) +
-  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
-  xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Conserved enriched") +
-  coord_cartesian(ylim = c(-4, 4)) +
-  my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-## plot motif merged----
-rownames(table_tad_motif_merge) <- ifelse(table_tad_motif_merge$serial == 0, 'N', 'C')
-table_tad_motif_merge <- as.data.frame(t(table_tad_motif_merge[, 5:ncol(table_tad_motif_merge)]))
-table_tad_motif_merge$motif_id <- rownames(table_tad_motif_merge)
+table_tad_motif_select <- subset(table_tad_motif, motif_id %in% selected_motif$motif_id)
+table_tad_motif_select$motif_id <- factor(table_tad_motif_select$motif_id, 
+                                          levels = selected_motif$motif_id)
+#
+stat <- tapply(table_tad_motif_select$per, 
+               list(table_tad_motif_select$motif_id, table_tad_motif_select$group),
+               function(x) boxplot.stats(x))
+stats <- unlist(tapply(table_tad_motif_select$per, 
+               list(table_tad_motif_select$motif_id, table_tad_motif_select$group),
+               function(x) boxplot.stats(x))$stats)
+table_tad_motif_select_boxplot <-data.frame(
+  motif_id = rep(rep(unlist(dimnames(stat)[1]), each= 5),
+                    length(unlist(dimnames(stat)[2]))),
+  group = rep(unlist(dimnames(stat)[2]), each = 5*length(selected_motif$motif_id)),
+  per = unlist(tapply(table_tad_motif_select$per,list(table_tad_motif_select$motif_id,table_tad_motif_select$group),function(x) boxplot.stats(x)$stats)))
+
 table_tad_motif_merge$tf <- motif_anno$tf[match(table_tad_motif_merge$motif_id, motif_anno$motif_id)]
 table_tad_motif_merge$motif_name <- paste0(table_tad_motif_merge$tf,
                                  '_',
                                  table_tad_motif_merge$motif_id)
-C_enriched_motif <- subset(table_tad_motif_merge, C > 1.15)$motif_id
-N_enriched_motif <- subset(table_tad_motif_merge, C < 0.85)$motif_id
-plot_tad_motif_merge <- ggplot(table_tad_motif_merge, aes(x = C, y = N)) +
-  geom_point() +
-  geom_point(data = subset(table_tad_motif_merge, C < 0.85 | C > 1.15), 
-             aes(x = C, y = N), color = "red") +
-  geom_text_repel(data = subset(table_tad_motif_merge, C < 0.85 | C > 1.15), 
-            aes(x = C, y = N, label = tf), 
-            size = 4,
-            vjust = 0.5,
-            nudge_y = - (subset(table_tad_motif_merge, C < 0.85 | C > 1.15)$N - 1)) +
-            #check_overlap = F,
-            #hjust = 0, 
-            #nudge_x = 0.01) +
-  geom_hline(yintercept = 1.0) +
-  geom_vline(xintercept = 1.0) +
-  xlab("Ratio (Conserved TADs)") +
-  ylab("Ratio (Non-conserved TADs)") +
-  my_theme
-## plot motif (merged selecte)----
-plot_tad_motif_enrich_merge <- ggplot(subset(table_tad_motif, motif_id %in% N_enriched_motif), 
-       aes(x = motif_name, 
-           y = log2_ratio, 
-           color = group)) +
+#
+table_tad_motif_select_boxplot$tf <- motif_anno$tf[match(table_tad_motif_select_boxplot$motif_id, motif_anno$motif_id)]
+table_tad_motif_select_boxplot$motif_name = paste0(table_tad_motif_select_boxplot$tf, 
+                                                   '_',
+                                                   table_tad_motif_select_boxplot$motif_id)
+#
+plot_tad_motif_enrich <- ggplot(table_tad_motif_select_boxplot, 
+       aes(x = group, 
+           y = per, 
+           fill = group)) +
   geom_hline(yintercept = 0.0) +
-  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
+  #geom_violin() +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.15, jitter.height = 0), 
+  #           alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.7, outlier.shape = NA, color = "black") +
+  scale_fill_manual(name = "TADs", values = c("C" = "#fb6a4a", "N" = "#80b1d3")) +
+  facet_wrap(~ motif_name, ncol = 6, scales = "free_y") +
   xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Nonconserved enriched") +
-  coord_cartesian(ylim = c(-4, 4)) +
+  ylab("Percentage") +
+  #coord_cartesian(ylim = c(-10, 10)) +
   my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-plot_tad_motif_deplete_merge <- ggplot(subset(table_tad_motif, motif_id %in% C_enriched_motif), 
-       aes(x = motif_name, 
-           y = log2_ratio, 
-           color = group)) +
-  geom_hline(yintercept = 0.0) +
-  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
-  xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Conserved enriched") +
-  coord_cartesian(ylim = c(-4, 4)) +
-  my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-
+  theme(axis.text.x = element_blank())
 #######################
 repeat_in_tad_per_cutoff = 0.1
 min_TAD_size_cutoff = 100000
@@ -1224,9 +1214,9 @@ rownames(table_tad_repeat_merge) <- ifelse(table_tad_repeat_merge$serial == 0, '
 # add row & col name for pval data.frame
 rownames(table_tad_repeat_merge_pval) <- rownames(table_tad_repeat_merge)
 # transpose the data.frame
-table_tad_repeat_merge <- as.data.frame(t(table_tad_repeat_merge[, 5:ncol(table_tad_repeat_merge)]))
+table_tad_repeat_merge <- as.data.frame(t(table_tad_repeat_merge[, 4:ncol(table_tad_repeat_merge)]))
 table_tad_repeat_merge$repeat_family <- rownames(table_tad_repeat_merge)
-table_tad_repeat_merge_pval <- as.data.frame(t(table_tad_repeat_merge_pval))
+table_tad_repeat_merge_pval <- as.data.frame(t(table_tad_repeat_merge_pval[, 4:ncol(table_tad_repeat_merge_pval)]))
 table_tad_repeat_merge_pval$repeat_family <- rownames(table_tad_repeat_merge_pval)
 table_tad_repeat_merge <- merge(table_tad_repeat_merge, table_tad_repeat_merge_pval, 
                                 by = "repeat_family", suffixes = c(".ratio", ".pval"))
@@ -1245,7 +1235,7 @@ plot_tad_repeat_merge <- ggplot(table_tad_repeat_merge, aes(x = C.ratio, y = log
   geom_hline(yintercept = 0.0) +
   geom_hline(yintercept = 2.0, linetype = 2, color = "darkgrey") +
   geom_vline(xintercept = 1.0) +
-  coord_cartesian(ylim = c(0, 17)) +
+  coord_cartesian(ylim = c(0, 17), xlim = c(0.7, 1.3)) +
   xlab("Ratio (Conserved TADs)") +
   ylab("-log10(P value)") +
   my_theme
@@ -1322,19 +1312,16 @@ plot_tad_repeat_enrich <- ggplot(table_tad_repeat_select_boxplot,
 ### final plot-----
 ## motif
 write.table(tad_motif_pass, file = "figure/figure_global_off_diagnal_tad_motif.txt",
-            col.names = F, row.names = F, quote = F, sep = '\t')
-pdf(file = 'figure/figure_global_off_diagnal_tad_motif_merge.pdf', width = 7, height = 7)
+            col.names = T, row.names = F, quote = F, sep = '\t')
+pdf(file = 'figure/figure_global_off_diagnal_tad_motif_merge.pdf', width = 6, height = 4)
 print(plot_tad_motif_merge)
 dev.off()
-pdf(file = "figure/figure_global_off_diagnal_tad_motif.pdf", width = 8, height =5)
+pdf(file = "figure/figure_global_off_diagnal_tad_motif.pdf", width = 12, height = 6)
 print(plot_tad_motif_enrich)
-print(plot_tad_motif_deplete)
-print(plot_tad_motif_enrich_merge)
-print(plot_tad_motif_deplete_merge)
 dev.off()
 ## repeat
 write.table(tad_repeat_pass, file = "figure/figure_global_off_diagnal_tad_repeat.txt", 
-            col.names = F, row.names = F, quote = F, sep = '\t')
+            col.names = T, row.names = F, quote = F, sep = '\t')
 pdf(file = 'figure/figure_global_off_diagnal_tad_repeat_merge.pdf', width= 6, height = 4)
 print(plot_tad_repeat_merge)
 dev.off()
@@ -1343,7 +1330,4 @@ print(plot_tad_repeat_enrich)
 dev.off()
 ```
 
-```{r}
-
-```
 

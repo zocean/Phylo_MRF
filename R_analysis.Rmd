@@ -1013,6 +1013,7 @@ dev.off()
 ## off-diagnal TADs
 
 ```{r}
+min_TAD_size_cutoff = 100000
 ## load motif data----
 table_tad_motif <- read.table(file = "data/phylo_MRF_output_global_V2/motif/motif_hg38_align.DI.thresh10.normalize.local.txt",
                               header = T,
@@ -1026,14 +1027,14 @@ table_tad_motif_merge <- read.table(file = "data/phylo_MRF_output_global_V2/moti
 table_tad_motif$serial <- ifelse(table_tad_motif$serial == 0, 'N', 'C')
 ## filter tad with too small size----
 table_tad_motif$size <- table_tad_motif$stop - table_tad_motif$start
-table_tad_motif <- subset(table_tad_motif, size > 100000)
+table_tad_motif <- subset(table_tad_motif, size > min_TAD_size_cutoff)
 ## skip columns with zero count/length in background----
 table_tad_motif <- table_tad_motif[, colnames(table_tad_motif_merge)[colSums(table_tad_motif_merge, na.rm = T) > 0]]
 ## change ratio = 0 to the minal ratio observed----
-motif_min <- unlist(table_tad_motif[, 4:ncol(table_tad_motif)])
-motif_min <- motif_min[motif_min!=0] 
-motif_min <- min(motif_min)
-table_tad_motif[table_tad_motif < 1e-16] <- motif_min
+#motif_min <- unlist(table_tad_motif[, 4:ncol(table_tad_motif)])
+#motif_min <- motif_min[motif_min!=0] 
+#motif_min <- min(motif_min)
+#table_tad_motif[table_tad_motif < 1e-16] <- motif_min
 ## for each motif, run wilcox rank-sum test and calculate pvalue----
 tad_motif_pass_list = c()
 tad_motif_pass_pval = c()
@@ -1092,7 +1093,7 @@ plot_tad_motif_enrich <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif_
   xlab("") +
   ylab("log2 enrichment ratio") +
   ggtitle("Nonconserved enriched") +
-  coord_cartesian(ylim = c(-10, 2)) +
+  coord_cartesian(ylim = c(-4, 4)) +
   my_theme +
   theme(axis.text.x = element_text(hjust = 1, angle = 45))
 plot_tad_motif_deplete <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif_pass_deplete$motif_id), 
@@ -1106,7 +1107,7 @@ plot_tad_motif_deplete <- ggplot(subset(table_tad_motif, motif_id %in% tad_motif
   xlab("") +
   ylab("log2 enrichment ratio") +
   ggtitle("Conserved enriched") +
-  #coord_cartesian(ylim = c(-4, 4)) +
+  coord_cartesian(ylim = c(-4, 4)) +
   my_theme +
   theme(axis.text.x = element_text(hjust = 1, angle = 45))
 ## plot motif merged----
@@ -1117,6 +1118,8 @@ table_tad_motif_merge$tf <- motif_anno$tf[match(table_tad_motif_merge$motif_id, 
 table_tad_motif_merge$motif_name <- paste0(table_tad_motif_merge$tf,
                                  '_',
                                  table_tad_motif_merge$motif_id)
+C_enriched_motif <- subset(table_tad_motif_merge, C > 1.15)$motif_id
+N_enriched_motif <- subset(table_tad_motif_merge, C < 0.85)$motif_id
 plot_tad_motif_merge <- ggplot(table_tad_motif_merge, aes(x = C, y = N)) +
   geom_point() +
   geom_point(data = subset(table_tad_motif_merge, C < 0.85 | C > 1.15), 
@@ -1124,8 +1127,8 @@ plot_tad_motif_merge <- ggplot(table_tad_motif_merge, aes(x = C, y = N)) +
   geom_text_repel(data = subset(table_tad_motif_merge, C < 0.85 | C > 1.15), 
             aes(x = C, y = N, label = tf), 
             size = 4,
-            vjust = 0.5) +
-            #nudge_y = - (subset(table_tad_motif_merge, C < 0.85 | C > 1.15)$N - 1)) +
+            vjust = 0.5,
+            nudge_y = - (subset(table_tad_motif_merge, C < 0.85 | C > 1.15)$N - 1)) +
             #check_overlap = F,
             #hjust = 0, 
             #nudge_x = 0.01) +
@@ -1134,11 +1137,41 @@ plot_tad_motif_merge <- ggplot(table_tad_motif_merge, aes(x = C, y = N)) +
   xlab("Ratio (Conserved TADs)") +
   ylab("Ratio (Non-conserved TADs)") +
   my_theme
+## plot motif (merged selecte)----
+plot_tad_motif_enrich_merge <- ggplot(subset(table_tad_motif, motif_id %in% N_enriched_motif), 
+       aes(x = motif_name, 
+           y = log2_ratio, 
+           color = group)) +
+  geom_hline(yintercept = 0.0) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
+             alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
+  xlab("") +
+  ylab("log2 enrichment ratio") +
+  ggtitle("Nonconserved enriched") +
+  coord_cartesian(ylim = c(-4, 4)) +
+  my_theme +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
+plot_tad_motif_deplete_merge <- ggplot(subset(table_tad_motif, motif_id %in% C_enriched_motif), 
+       aes(x = motif_name, 
+           y = log2_ratio, 
+           color = group)) +
+  geom_hline(yintercept = 0.0) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.1, jitter.height = 0), 
+             alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
+  xlab("") +
+  ylab("log2 enrichment ratio") +
+  ggtitle("Conserved enriched") +
+  coord_cartesian(ylim = c(-4, 4)) +
+  my_theme +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45))
 
+#######################
 repeat_in_tad_per_cutoff = 0.1
 min_TAD_size_cutoff = 100000
 ## load repeat data----
-table_tad_repeat <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/tad/v1/rmsk_hg38_align.DI.thresh10.normalize.txt", 
+table_tad_repeat <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/tad/percentage/rmsk_hg38_align.DI.thresh10.local.percentage.txt", 
                                header = T,
                                sep = '\t',
                                check.names = F)
@@ -1146,6 +1179,16 @@ table_tad_repeat_merge <- read.table(file = "data/phylo_MRF_output_global_V2/rms
                                header = T,
                                sep = '\t',
                                check.names = F)
+table_tad_repeat_merge_pval <- read.table(file = "data/phylo_MRF_output_global_V2/rmsk/tad/rmsk_hg38_align.DI.thresh10.chi2.txt",
+                                          header = F, 
+                                          sep = '\t',
+                                          check.names = F)
+table_tad_repeat_merge_pval <- cbind(table_tad_repeat_merge[, 1:4], table_tad_repeat_merge_pval)
+colnames(table_tad_repeat_merge_pval) <- colnames(table_tad_repeat_merge)
+## filter tad with too small size----
+table_tad_repeat$size <- table_tad_repeat$stop - table_tad_repeat$start
+table_tad_repeat <- subset(table_tad_repeat, size > min_TAD_size_cutoff)
+table_tad_repeat$size <- NULL
 ## filter if repeat freq < repeat_in_tad_per_cutoff ------
 min_list <- apply(table_tad_repeat, 2, function(x) min(x, na.rm = T))
 tmp_col_list = c()
@@ -1158,45 +1201,76 @@ for (nn in seq(5, ncol(table_tad_repeat),1)) {
   tmp_col = c(tmp_col, nn)
 }
 repeat_pass <- data.frame(repeat_family = tmp_col_list, freq = tmp_freq, col = tmp_col)
-## use length feature----
-repeat_family_col <- setdiff(grep('.len', colnames(table_tad_repeat_merge)),
-                               grep('\\?', colnames(table_tad_repeat_merge)))
+## select repeat family ----
+repeat_family_all <- seq(5, ncol(table_tad_repeat_merge))
+repeat_family_question <- grep('\\?', colnames(table_tad_repeat_merge))
+repeat_family_len <- grep('.len', colnames(table_tad_repeat_merge))
+# select repeat family columns
+repeat_family_col <- setdiff(repeat_family_all, union(repeat_family_question, repeat_family_len))
+# or only length
+#repeat_family_col <- setdiff(repeat_family_len, repeat_family_question)
 repeat_family_col <- intersect(repeat_family_col, subset(repeat_pass, tmp_freq > repeat_in_tad_per_cutoff)$col)
 table_tad_repeat <- table_tad_repeat[, c(c(1,2,3,4), repeat_family_col)]
 table_tad_repeat_merge <- table_tad_repeat_merge[, c(c(1,2,3,4), repeat_family_col)]
-## add group -----
-table_tad_repeat$serial <- ifelse(table_tad_repeat$serial == 0, 'N', 'C')
-## filter tad with too small size----
-table_tad_repeat$size <- table_tad_repeat$stop - table_tad_repeat$start
-table_tad_repeat <- subset(table_tad_repeat, size > min_TAD_size_cutoff)
+table_tad_repeat_merge_pval <- table_tad_repeat_merge_pval[, c(c(1,2,3,4), repeat_family_col)]
 ## skip columns with zero count/length in background----
 table_tad_repeat <- table_tad_repeat[, colnames(table_tad_repeat_merge)[colSums(table_tad_repeat_merge, na.rm = T) > 0]]
 table_tad_repeat_merge <- table_tad_repeat_merge[, colnames(table_tad_repeat_merge)[colSums(table_tad_repeat_merge, na.rm = T) > 0]]
-## change ratio = 0 to the minal ratio observed----
-#repeat_min <- unlist(table_tad_repeat[, 4:ncol(table_tad_repeat)])
-#repeat_min <- repeat_min[repeat_min!=0] 
-#repeat_min <- min(repeat_min)
-#table_tad_repeat[table_tad_repeat < 0.001] <- NA
+table_tad_repeat_merge_pval <- table_tad_repeat_merge_pval[, colnames(table_tad_repeat_merge)[colSums(table_tad_repeat_merge, na.rm = T) > 0]]
+
+###### 
+## plot repeat merged----
+rownames(table_tad_repeat_merge) <- ifelse(table_tad_repeat_merge$serial == 0, 'N', 'C')
+# add row & col name for pval data.frame
+rownames(table_tad_repeat_merge_pval) <- rownames(table_tad_repeat_merge)
+# transpose the data.frame
+table_tad_repeat_merge <- as.data.frame(t(table_tad_repeat_merge[, 5:ncol(table_tad_repeat_merge)]))
+table_tad_repeat_merge$repeat_family <- rownames(table_tad_repeat_merge)
+table_tad_repeat_merge_pval <- as.data.frame(t(table_tad_repeat_merge_pval))
+table_tad_repeat_merge_pval$repeat_family <- rownames(table_tad_repeat_merge_pval)
+table_tad_repeat_merge <- merge(table_tad_repeat_merge, table_tad_repeat_merge_pval, 
+                                by = "repeat_family", suffixes = c(".ratio", ".pval"))
+table_tad_repeat_merge$log10_pval_C <- -log10(table_tad_repeat_merge$C.pval + 2.2e-16)
+# select repeat family
+selected_repeat <- subset(table_tad_repeat_merge, log10_pval_C > 2)
+# plot 
+plot_tad_repeat_merge <- ggplot(table_tad_repeat_merge, aes(x = C.ratio, y = log10_pval_C)) +
+  geom_point(alpha = 0.8, pch = 21, fill = "grey") +
+  geom_point(data = subset(table_tad_repeat_merge, log10_pval_C > 2), 
+             aes(x = C.ratio, y = log10_pval_C), pch = 21, fill = "red") +
+  geom_text_repel(data = subset(table_tad_repeat_merge, log10_pval_C > 2), 
+            aes(x = C.ratio, y = log10_pval_C, label = repeat_family), 
+            size = 4,
+            vjust = 0.5) +
+  geom_hline(yintercept = 0.0) +
+  geom_hline(yintercept = 2.0, linetype = 2, color = "darkgrey") +
+  geom_vline(xintercept = 1.0) +
+  coord_cartesian(ylim = c(0, 17)) +
+  xlab("Ratio (Conserved TADs)") +
+  ylab("-log10(P value)") +
+  my_theme
+## add group -----
+table_tad_repeat$serial <- ifelse(table_tad_repeat$serial == 0, 'N', 'C')
 ## for each repeat family, run wilcox rank-sum test and calculate pvalue----
 tad_repeat_pass_list = c()
 tad_repeat_pass_pval = c()
 tad_repeat_pass_fc = c()
 tad_repeat_pass_median_n = c()
 tad_repeat_pass_median_c = c()
-for (col in colnames(table_tad_repeat)[4:ncol(table_tad_repeat)]) {
-  group_nonconserved <- log2(table_tad_repeat[which(table_tad_repeat$serial == 'N'), col])
-  group_conserved <- log2(table_tad_repeat[which(table_tad_repeat$serial == 'C'), col])
+for (col in selected_repeat$repeat_family) {
+  #group_nonconserved <- log2(table_tad_repeat[which(table_tad_repeat$serial == 'N'), col])
+  #group_conserved <- log2(table_tad_repeat[which(table_tad_repeat$serial == 'C'), col])
+  group_nonconserved <- table_tad_repeat[which(table_tad_repeat$serial == 'N'), col]
+  group_conserved <- table_tad_repeat[which(table_tad_repeat$serial == 'C'), col]
   group_nonconserved <- group_nonconserved[!is.na(group_nonconserved) & is.finite(group_nonconserved)]
   group_conserved <- group_conserved[!is.na(group_conserved) & is.finite(group_conserved)]
   if (length(group_nonconserved) > 2 & length(group_conserved) > 2) {
     pval <- wilcox.test(group_nonconserved, group_conserved)
-    if (pval$p.value < 0.1 & !is.na(pval$p.value)) {
-      tad_repeat_pass_list <- c(tad_repeat_pass_list, col)
-      tad_repeat_pass_pval <- c(tad_repeat_pass_pval, pval$p.value)
-      tad_repeat_pass_fc <- c(tad_repeat_pass_fc, mean(group_nonconserved, na.rm =T) - mean(group_conserved, na.rm = T))
-      tad_repeat_pass_median_n <- c(tad_repeat_pass_median_n, median(group_nonconserved, na.rm =T))
-      tad_repeat_pass_median_c <- c(tad_repeat_pass_median_c, median(group_conserved, na.rm = T))
-    }
+    tad_repeat_pass_list <- c(tad_repeat_pass_list, col)
+    tad_repeat_pass_pval <- c(tad_repeat_pass_pval, pval$p.value)
+    tad_repeat_pass_fc <- c(tad_repeat_pass_fc, mean(group_nonconserved, na.rm =T) - mean(group_conserved, na.rm = T))
+    tad_repeat_pass_median_n <- c(tad_repeat_pass_median_n, median(group_nonconserved, na.rm =T))
+    tad_repeat_pass_median_c <- c(tad_repeat_pass_median_c, median(group_conserved, na.rm = T))
   }
 }
 tad_repeat_pass <- data.frame(repeat_family = tad_repeat_pass_list, 
@@ -1208,118 +1282,68 @@ tad_repeat_pass <- data.frame(repeat_family = tad_repeat_pass_list,
 table_tad_repeat <- melt(table_tad_repeat, 
                         id.vars = c("chrom", "stop", "serial"), 
                         variable.name = "repeat_family", 
-                        value.name = "ratio")
-table_tad_repeat$ratio <- as.numeric(table_tad_repeat$ratio)
+                        value.name = "per")
+table_tad_repeat$per <- as.numeric(table_tad_repeat$per)
 ## plot repeat ----
 table_tad_repeat$group <- table_tad_repeat$serial
-table_tad_repeat$log2_ratio <- log2(table_tad_repeat$ratio)
-tad_repeat_pass_enrich <- subset(tad_repeat_pass, fc > log2(1.1))
-tad_repeat_pass_deplete <- subset(tad_repeat_pass, fc < -log2(1.1))
-plot_tad_repeat_enrich <- ggplot(subset(table_tad_repeat, repeat_family %in% tad_repeat_pass_enrich$repeat_family), 
-       aes(x = repeat_family, 
-           y = log2_ratio, 
-           color = group)) +
+table_tad_repeat_select <- subset(table_tad_repeat, repeat_family %in% selected_repeat$repeat_family)
+table_tad_repeat_select$repeat_family <- factor(table_tad_repeat_select$repeat_family, 
+                                                levels = selected_repeat$repeat_family)
+# https://stackoverflow.com/questions/25124895/no-outliers-in-ggplot-boxplot-with-facet-wrap
+stat <- tapply(table_tad_repeat_select$per, 
+               list(table_tad_repeat_select$repeat_family, table_tad_repeat_select$group),
+               function(x) boxplot.stats(x))
+stats <- unlist(tapply(table_tad_repeat_select$per, 
+               list(table_tad_repeat_select$repeat_family, table_tad_repeat_select$group),
+               function(x) boxplot.stats(x))$stats)
+table_tad_repeat_select_boxplot <-data.frame(
+  repeat_family = rep(rep(unlist(dimnames(stat)[1]), each= 5),
+                    length(unlist(dimnames(stat)[2]))),
+  group = rep(unlist(dimnames(stat)[2]), each = 5*length(selected_repeat$repeat_family)),
+  per = unlist(tapply(table_tad_repeat_select$per,list(table_tad_repeat_select$repeat_family,table_tad_repeat_select$group),function(x) boxplot.stats(x)$stats)))
+# "#cb181d", "#fb6a4a", "#fba988", "#80b1d3", "#377eb8",
+plot_tad_repeat_enrich <- ggplot(table_tad_repeat_select_boxplot, 
+       aes(x = group, 
+           y = per, 
+           fill = group)) +
   geom_hline(yintercept = 0.0) +
   #geom_violin() +
-  geom_point(position = position_jitterdodge(jitter.width = 0.15, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
+  #geom_point(position = position_jitterdodge(jitter.width = 0.15, jitter.height = 0), 
+  #           alpha = 0.7, size = 0.7) +
+  geom_boxplot(outlier.size = 0, width = 0.7, outlier.shape = NA, color = "black") +
+  scale_fill_manual(name = "TADs", values = c("C" = "#fb6a4a", "N" = "#80b1d3")) +
+  facet_wrap(~ repeat_family, ncol = 6, scales = "free_y") +
   xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Nonconserved enriched") +
+  ylab("Percentage") +
   #coord_cartesian(ylim = c(-10, 10)) +
   my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-plot_tad_repeat_deplete <- ggplot(subset(table_tad_repeat, repeat_family %in% tad_repeat_pass_deplete$repeat_family), 
-       aes(x = repeat_family, 
-           y = log2_ratio, 
-           color = group)) +
-  geom_hline(yintercept = 0.0) +
-  geom_point(position = position_jitterdodge(jitter.width = 0.15, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
-  xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Conserved enriched") +
-  coord_cartesian(ylim = c(-4, 4)) +
-  my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-
-## plot repeat merged----
-rownames(table_tad_repeat_merge) <- ifelse(table_tad_repeat_merge$serial == 0, 'N', 'C')
-table_tad_repeat_merge <- as.data.frame(t(table_tad_repeat_merge[, 5:ncol(table_tad_repeat_merge)]))
-table_tad_repeat_merge$repeat_family <- rownames(table_tad_repeat_merge)
-C_enriched_repeat <- subset(table_tad_repeat_merge, C > 1.1)$repeat_family
-N_enriched_repeat <- subset(table_tad_repeat_merge, C < 0.9)$repeat_family
-plot_tad_repeat_merge <- ggplot(table_tad_repeat_merge, aes(x = C, y = N)) +
-  geom_point() +
-  geom_point(data = subset(table_tad_repeat_merge, C < 0.9 | C > 1.1), 
-             aes(x = C, y = N), color = "red") +
-  geom_text_repel(data = subset(table_tad_repeat_merge, C < 0.9 | C > 1.1), 
-            aes(x = C, y = N, label = repeat_family), 
-            size = 4,
-            vjust = 0.5) +
-            #nudge_y = - (subset(table_tad_repeat_merge, C < 0.9 | C > 1.1)$N - 1)) +
-            #check_overlap = F,
-            #hjust = 0, 
-            #nudge_x = 0.01) +
-  geom_hline(yintercept = 1.0) +
-  geom_vline(xintercept = 1.0) +
-  xlab("Ratio (Conserved TADs)") +
-  ylab("Ratio (Non-conserved TADs)") +
-  my_theme
-## plot repeat (merged selected) -----
-plot_tad_repeat_enrich_merge <- ggplot(subset(table_tad_repeat, repeat_family %in% N_enriched_repeat), 
-       aes(x = repeat_family, 
-           y = log2_ratio, 
-           color = group)) +
-  geom_hline(yintercept = 0.0) +
-  #geom_violin() +
-  geom_point(position = position_jitterdodge(jitter.width = 0.15, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
-  xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Nonconserved enriched (merge)") +
-  #coord_cartesian(ylim = c(-10, 10)) +
-  my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-plot_tad_repeat_deplete_merge <- ggplot(subset(table_tad_repeat, repeat_family %in% C_enriched_repeat), 
-       aes(x = repeat_family, 
-           y = log2_ratio, 
-           color = group)) +
-  geom_hline(yintercept = 0.0) +
-  geom_point(position = position_jitterdodge(jitter.width = 0.15, jitter.height = 0), 
-             alpha = 0.7, size = 0.7) +
-  geom_boxplot(outlier.size = 0, width = 0.8, outlier.shape = NA) +
-  xlab("") +
-  ylab("log2 enrichment ratio") +
-  ggtitle("Conserved enriched (merge)") +
-  coord_cartesian(ylim = c(-4, 4)) +
-  my_theme +
-  theme(axis.text.x = element_text(hjust = 1, angle = 45))
-
-###############
+  theme(axis.text.x = element_blank())
+##################
 ### final plot-----
-write.table(tad_repeat_pass, file = "figure/figure_global_off_diagnal_tad_repeat.txt", 
-            col.names = F, row.names = F, quote = F, sep = '\t')
+## motif
 write.table(tad_motif_pass, file = "figure/figure_global_off_diagnal_tad_motif.txt",
             col.names = F, row.names = F, quote = F, sep = '\t')
 pdf(file = 'figure/figure_global_off_diagnal_tad_motif_merge.pdf', width = 7, height = 7)
 print(plot_tad_motif_merge)
 dev.off()
-pdf(file = 'figure/figure_global_off_diagnal_tad_repeat_merge.pdf', width= 7, height = 7)
-print(plot_tad_repeat_merge)
-dev.off()
 pdf(file = "figure/figure_global_off_diagnal_tad_motif.pdf", width = 8, height =5)
 print(plot_tad_motif_enrich)
 print(plot_tad_motif_deplete)
+print(plot_tad_motif_enrich_merge)
+print(plot_tad_motif_deplete_merge)
 dev.off()
-pdf(file = "figure/figure_global_off_diagnal_tad_repeat.pdf", width = 8, height =5)
+## repeat
+write.table(tad_repeat_pass, file = "figure/figure_global_off_diagnal_tad_repeat.txt", 
+            col.names = F, row.names = F, quote = F, sep = '\t')
+pdf(file = 'figure/figure_global_off_diagnal_tad_repeat_merge.pdf', width= 6, height = 4)
+print(plot_tad_repeat_merge)
+dev.off()
+pdf(file = "figure/figure_global_off_diagnal_tad_repeat.pdf", width = 12, height = 6)
 print(plot_tad_repeat_enrich)
-print(plot_tad_repeat_deplete)
-print(plot_tad_repeat_enrich_merge)
-print(plot_tad_repeat_deplete_merge)
 dev.off()
+```
+
+```{r}
+
 ```
 
